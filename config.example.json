@@ -1,0 +1,25 @@
+{
+  "watched_folders": [
+    {
+      "path": "/Users/yourname/Downloads",
+      "enabled": true,
+      "recursive": false,
+      "file_extensions": null
+    }
+  ],
+  "ai_config": {
+    "provider": "openai",
+    "api_key": "your-api-key-here",
+    "model": "gpt-4",
+    "temperature": 0.3
+  },
+  "archive_config": {
+    "base_path": "/Users/yourname/Documents/Archive",
+    "create_date_folders": true,
+    "create_category_folders": true,
+    "move_files": true
+  },
+  "log_level": "INFO",
+  "check_interval": 1.0
+}
+
