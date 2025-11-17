@@ -17,7 +17,9 @@ jobs:
           - os: windows-latest
             artifact-name: watchdock-windows
           - os: macos-latest
-            artifact-name: watchdock-macos
+            artifact-name: watchdock-macos-arm64
+          - os: macos-13
+            artifact-name: watchdock-macos-intel
     
     runs-on: ${{ matrix.os }}
     
@@ -38,24 +40,33 @@ jobs:
     - name: Build executable (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: |
-        pyinstaller --name=watchdock --onefile watchdock/main.py
-        pyinstaller --name=WatchDock --windowed --onefile watchdock/gui_main.py
+        pyinstaller --name=watchdock-0.1.0-linux --onefile watchdock/main.py
+        pyinstaller --name=WatchDock-0.1.0-linux --windowed --onefile watchdock/gui_main.py
     
     - name: Build executable (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        pyinstaller --name=watchdock --onefile watchdock/main.py
-        pyinstaller --name=WatchDock --windowed --onefile watchdock/gui_main.py
+        pyinstaller --name=watchdock-0.1.0-windows --onefile watchdock/main.py
+        pyinstaller --name=WatchDock-0.1.0-windows --windowed --onefile watchdock/gui_main.py
     
-    - name: Build executable (macOS)
+    - name: Build executable (macOS - Apple Silicon)
       if: matrix.os == 'macos-latest'
       run: |
-        pyinstaller --name=watchdock --onefile watchdock/main.py
-        pyinstaller --name=WatchDock --windowed --onefile watchdock/gui_main.py
+        pyinstaller --name=watchdock-0.1.0-arm64 --onefile watchdock/main.py
+        pyinstaller --name=WatchDock-0.1.0-arm64 --windowed --onefile watchdock/gui_main.py
+    
+    - name: Build executable (macOS - Intel)
+      if: matrix.os == 'macos-13'
+      run: |
+        pyinstaller --name=watchdock-0.1.0-intel --onefile watchdock/main.py
+        pyinstaller --name=WatchDock-0.1.0-intel --windowed --onefile watchdock/gui_main.py
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.artifact-name }}
-        path: dist/
+        path: |
+          dist/watchdock*
+          dist/WatchDock*
+        retention-days: 30
 
