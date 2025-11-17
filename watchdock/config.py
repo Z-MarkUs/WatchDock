@@ -45,6 +45,7 @@ class WatchDockConfig:
     archive_config: ArchiveConfig
     log_level: str = "INFO"
     check_interval: float = 1.0  # seconds
+    mode: str = "auto"  # "auto" or "hitl" (Human-In-The-Loop)
 
     @classmethod
     def load(cls, config_path: str) -> "WatchDockConfig":
@@ -60,7 +61,8 @@ class WatchDockConfig:
             ai_config=AIConfig(**data.get('ai_config', {})),
             archive_config=ArchiveConfig(**data.get('archive_config', {})),
             log_level=data.get('log_level', 'INFO'),
-            check_interval=data.get('check_interval', 1.0)
+            check_interval=data.get('check_interval', 1.0),
+            mode=data.get('mode', 'auto')
         )
     
     def save(self, config_path: str):
@@ -70,7 +72,8 @@ class WatchDockConfig:
             'ai_config': asdict(self.ai_config),
             'archive_config': asdict(self.archive_config),
             'log_level': self.log_level,
-            'check_interval': self.check_interval
+            'check_interval': self.check_interval,
+            'mode': self.mode
         }
         
         with open(config_path, 'w') as f:
@@ -102,6 +105,7 @@ class WatchDockConfig:
                 move_files=True
             ),
             log_level="INFO",
-            check_interval=1.0
+            check_interval=1.0,
+            mode="auto"
         )
 

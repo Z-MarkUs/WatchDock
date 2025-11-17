@@ -20,6 +20,36 @@ class FileOrganizer:
         self.archive_base = Path(config.archive_config.base_path)
         self.archive_base.mkdir(parents=True, exist_ok=True)
     
+    def get_proposed_action(self, file_path: str, analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get proposed action without executing it (for HITL mode).
+        
+        Returns:
+            Dict with proposed action details
+        """
+        source_path = Path(file_path)
+        
+        if self.config.move_files:
+            dest_path = self._get_destination_path(source_path, analysis)
+            return {
+                'action_type': 'move',
+                'from': str(source_path),
+                'to': str(dest_path),
+                'new_name': dest_path.name,
+                'category': analysis.get('category', 'Other'),
+                'tags': analysis.get('tags', [])
+            }
+        else:
+            new_name = analysis.get('suggested_name', source_path.name)
+            return {
+                'action_type': 'rename',
+                'from': str(source_path),
+                'to': str(source_path.parent / new_name),
+                'new_name': new_name,
+                'category': analysis.get('category', 'Other'),
+                'tags': analysis.get('tags', [])
+            }
+    
     def organize_file(self, file_path: str, analysis: Dict[str, Any]) -> Dict[str, Any]:
         """
         Organize a file based on analysis results.

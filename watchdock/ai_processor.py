@@ -3,12 +3,15 @@ AI processor for understanding file content and generating organization suggesti
 """
 
 import os
+import json
 import mimetypes
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 import logging
 
 logger = logging.getLogger(__name__)
+
+FEW_SHOT_EXAMPLES_PATH = str(Path.home() / '.watchdock' / 'few_shot_examples.json')
 
 
 class AIProcessor:
@@ -18,7 +21,19 @@ class AIProcessor:
         self.config = config
         self.provider = config.provider
         self._client = None
+        self._few_shot_examples = self._load_few_shot_examples()
         self._initialize_client()
+    
+    def _load_few_shot_examples(self) -> List[Dict]:
+        """Load few-shot examples from file."""
+        try:
+            if os.path.exists(FEW_SHOT_EXAMPLES_PATH):
+                with open(FEW_SHOT_EXAMPLES_PATH, 'r') as f:
+                    examples = json.load(f)
+                    return examples if isinstance(examples, list) else []
+        except Exception as e:
+            logger.debug(f"Could not load few-shot examples: {e}")
+        return []
     
     def _initialize_client(self):
         """Initialize the AI client based on provider."""
@@ -125,7 +140,7 @@ class AIProcessor:
     
     def _get_system_prompt(self) -> str:
         """Get the system prompt for AI analysis."""
-        return """You are a file organization assistant. Analyze files and suggest:
+        prompt = """You are a file organization assistant. Analyze files and suggest:
 1. A category (e.g., "Documents", "Images", "Videos", "Code", "Archives", "Spreadsheets", "Presentations")
 2. A better filename (clean, descriptive, without special chars except - and _)
 3. Tags (comma-separated keywords)
@@ -138,6 +153,21 @@ Respond in JSON format:
   "tags": ["tag1", "tag2"],
   "description": "brief description"
 }"""
+        
+        # Add few-shot examples if available
+        if self._few_shot_examples:
+            prompt += "\n\nHere are some examples of how files should be organized:\n"
+            for ex in self._few_shot_examples[:5]:  # Limit to 5 examples
+                prompt += f"\nExample:\n"
+                prompt += f"  Original: {ex.get('file_name', '')}\n"
+                prompt += f"  Category: {ex.get('category', '')}\n"
+                prompt += f"  Suggested name: {ex.get('suggested_name', '')}\n"
+                if ex.get('tags'):
+                    prompt += f"  Tags: {', '.join(ex.get('tags', []))}\n"
+                if ex.get('description'):
+                    prompt += f"  Description: {ex.get('description', '')}\n"
+        
+        return prompt
     
     def _build_analysis_prompt(self, file_path: str, file_info: Dict, content_preview: str) -> str:
         """Build the prompt for AI analysis."""

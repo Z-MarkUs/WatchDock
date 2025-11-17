@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WatchDock - Configuration</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 WatchDock</h1>
+            <p class="subtitle">Configure your file monitoring and organization tool</p>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="folders">Watched Folders</button>
+            <button class="tab-btn" data-tab="ai">AI Settings</button>
+            <button class="tab-btn" data-tab="archive">Archive Settings</button>
+            <button class="tab-btn" data-tab="examples">Few-Shot Examples</button>
+        </div>
+
+        <!-- Watched Folders Tab -->
+        <div class="tab-content active" id="folders">
+            <h2>Watched Folders</h2>
+            <p class="description">Add folders to monitor for new files</p>
+            
+            <div id="folders-list"></div>
+            
+            <button class="btn btn-primary" onclick="addFolder()">+ Add Folder</button>
+        </div>
+
+        <!-- AI Settings Tab -->
+        <div class="tab-content" id="ai">
+            <h2>AI Configuration</h2>
+            <p class="description">Configure your AI provider for file analysis</p>
+            
+            <div class="form-group">
+                <label for="ai-provider">AI Provider</label>
+                <select id="ai-provider" onchange="updateAIProvider()">
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="ollama">Ollama (Local)</option>
+                </select>
+            </div>
+
+            <div class="form-group" id="api-key-group">
+                <label for="api-key">API Key</label>
+                <input type="password" id="api-key" placeholder="Enter your API key">
+                <small>Your API key is stored locally and never shared</small>
+            </div>
+
+            <div class="form-group">
+                <label for="ai-model">Model</label>
+                <input type="text" id="ai-model" placeholder="e.g., gpt-4, claude-3-opus, llama2">
+            </div>
+
+            <div class="form-group" id="base-url-group" style="display: none;">
+                <label for="base-url">Base URL</label>
+                <input type="text" id="base-url" placeholder="http://localhost:11434/v1">
+                <small>For local providers like Ollama</small>
+            </div>
+
+            <div class="form-group">
+                <label for="temperature">Temperature</label>
+                <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.3">
+                <span id="temperature-value">0.3</span>
+            </div>
+        </div>
+
+        <!-- Archive Settings Tab -->
+        <div class="tab-content" id="archive">
+            <h2>Archive Configuration</h2>
+            <p class="description">Configure how files are organized</p>
+            
+            <div class="form-group">
+                <label for="archive-path">Archive Base Path</label>
+                <div class="input-group">
+                    <input type="text" id="archive-path" placeholder="/path/to/archive">
+                    <button class="btn btn-secondary" onclick="testPath('archive-path')">Test</button>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="create-date-folders" checked>
+                    <span>Create date folders (YYYY-MM)</span>
+                </label>
+            </div>
+
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="create-category-folders" checked>
+                    <span>Create category folders</span>
+                </label>
+            </div>
+
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="move-files" checked>
+                    <span>Move files to archive (uncheck to only rename in place)</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Few-Shot Examples Tab -->
+        <div class="tab-content" id="examples">
+            <h2>Few-Shot Examples</h2>
+            <p class="description">Provide examples to help the AI understand your organization preferences</p>
+            
+            <div id="examples-list"></div>
+            
+            <button class="btn btn-primary" onclick="addExample()">+ Add Example</button>
+        </div>
+
+        <div class="actions">
+            <button class="btn btn-success" onclick="saveConfig()">💾 Save Configuration</button>
+            <button class="btn btn-secondary" onclick="loadConfig()">🔄 Reload</button>
+        </div>
+
+        <div id="status-message"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
+
