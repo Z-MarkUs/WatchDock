@@ -232,7 +232,7 @@ You can provide examples to help the AI understand your organization preferences
 - Tag preferences
 - Domain-specific file types
 
-Examples can be added through the web UI or by editing `~/.watchdock/few_shot_examples.json`:
+Examples can be added through the GUI or by editing `~/.watchdock/few_shot_examples.json`:
 
 ```json
 [

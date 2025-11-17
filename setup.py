@@ -35,10 +35,6 @@ setup(
             "watchdock-gui=watchdock.gui_main:main",
         ],
     },
-    include_package_data=True,
-    package_data={
-        'watchdock': ['templates/*.html', 'static/css/*.css', 'static/js/*.js'],
-    },
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: End Users/Desktop",

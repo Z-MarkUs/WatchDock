@@ -1,6 +1,4 @@
 include README.md
 include requirements.txt
 include config.example.json
-recursive-include watchdock/templates *.html
-recursive-include watchdock/static *.css *.js
 
