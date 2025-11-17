@@ -1,0 +1,60 @@
+name: Build Executables
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact-name: watchdock-linux
+          - os: windows-latest
+            artifact-name: watchdock-windows
+          - os: macos-latest
+            artifact-name: watchdock-macos
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+    
+    - name: Build executable (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        pyinstaller --name=watchdock --onefile watchdock/main.py
+        pyinstaller --name=WatchDock --windowed --onefile watchdock/gui_main.py
+    
+    - name: Build executable (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        pyinstaller --name=watchdock --onefile watchdock/main.py
+        pyinstaller --name=WatchDock --windowed --onefile --icon=icon.ico watchdock/gui_main.py
+    
+    - name: Build executable (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        pyinstaller --name=watchdock --onefile watchdock/main.py
+        pyinstaller --name=WatchDock --windowed --onefile --icon=icon.icns watchdock/gui_main.py
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact-name }}
+        path: dist/
+

@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "watchdock"
+version = "0.1.0"
+description = "A local, self-hosted file monitoring and organization tool using AI"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "WatchDock Team"}
+]
+keywords = ["file-organization", "ai", "automation", "file-management", "watchdog"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: System :: Filesystems",
+    "Topic :: Utilities",
+]
+
+dependencies = [
+    "watchdog>=3.0.0",
+    "openai>=1.0.0",
+    "anthropic>=0.18.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=23.0",
+    "flake8>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/watchdock"
+Documentation = "https://github.com/yourusername/watchdock#readme"
+Repository = "https://github.com/yourusername/watchdock"
+Issues = "https://github.com/yourusername/watchdock/issues"
+
+[project.scripts]
+watchdock = "watchdock.main:main"
+watchdock-gui = "watchdock.gui_main:main"
+
+[tool.setuptools]
+packages = ["watchdock"]
+
+[tool.setuptools.package-data]
+watchdock = ["py.typed"]
+

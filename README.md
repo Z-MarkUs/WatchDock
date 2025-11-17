@@ -16,11 +16,20 @@ A local, self-hosted, always-on "watchdog" tool that automatically organizes you
 
 ## Installation
 
+### Via pip (Recommended)
+
+```bash
+pip install watchdock
+```
+
+### From Source
+
 1. Clone or download this repository
 2. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
+pip install -e .
 ```
 
 ## Quick Start

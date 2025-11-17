@@ -26,6 +26,13 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="WatchDock Team",
+    author_email="your-email@example.com",
+    url="https://github.com/yourusername/watchdock",
+    project_urls={
+        "Bug Reports": "https://github.com/yourusername/watchdock/issues",
+        "Source": "https://github.com/yourusername/watchdock",
+        "Documentation": "https://github.com/yourusername/watchdock#readme",
+    },
     packages=find_packages(),
     install_requires=requirements,
     python_requires=">=3.8",

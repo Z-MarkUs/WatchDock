@@ -59,3 +59,16 @@ Thumbs.db
 .env
 .env.local
 
+# PyPI credentials
+.pypirc
+
+# Installer files
+*.dmg
+*.pkg
+*.exe
+*.deb
+*.rpm
+*.AppImage
+*.snap
+installer/
+
