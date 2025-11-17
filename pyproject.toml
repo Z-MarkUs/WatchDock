@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A local, self-hosted file monitoring and organization tool using AI"
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "WatchDock Team"}
 ]
@@ -42,10 +42,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/watchdock"
-Documentation = "https://github.com/yourusername/watchdock#readme"
-Repository = "https://github.com/yourusername/watchdock"
-Issues = "https://github.com/yourusername/watchdock/issues"
+Homepage = "https://github.com/Z-MarkUs/watchdock"
+Documentation = "https://github.com/Z-MarkUs/watchdock#readme"
+Repository = "https://github.com/Z-MarkUs/watchdock"
+Issues = "https://github.com/Z-MarkUs/watchdock/issues"
 
 [project.scripts]
 watchdock = "watchdock.main:main"
