@@ -29,6 +29,7 @@ ENV/
 # IDE
 .idea/
 .vscode/
+*.code-workspace
 *.swp
 *.swo
 *~
@@ -72,3 +73,5 @@ Thumbs.db
 *.snap
 installer/
 
+# Release notes (keep local, don't track)
+RELEASE_NOTES_*.md
