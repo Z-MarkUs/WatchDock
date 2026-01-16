@@ -6,6 +6,7 @@ import os
 import json
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import font as tkfont
 from pathlib import Path
 from typing import List, Dict, Optional
 import logging
@@ -25,8 +26,11 @@ class WatchDockGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("WatchDock - File Organization Tool")
-        self.root.geometry("800x700")
+        self.root.geometry("880x720")
         self.root.resizable(True, True)
+        self.root.minsize(860, 680)
+
+        self._apply_theme()
         
         # Try to set window icon (if available)
         try:
@@ -87,9 +91,19 @@ class WatchDockGUI:
     
     def _create_ui(self):
         """Create the UI components."""
+        header = ttk.Frame(self.root, style="Header.TFrame")
+        header.pack(fill=tk.X, padx=16, pady=(16, 8))
+
+        ttk.Label(header, text="WatchDock", style="Title.TLabel").pack(anchor=tk.W)
+        ttk.Label(
+            header,
+            text="Smart file organization with AI",
+            style="Subtitle.TLabel"
+        ).pack(anchor=tk.W, pady=(2, 0))
+
         # Create notebook (tabs)
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
         
         # Create tabs
         self._create_general_tab()
@@ -101,12 +115,12 @@ class WatchDockGUI:
         
         # Create bottom buttons
         button_frame = ttk.Frame(self.root)
-        button_frame.pack(fill=tk.X, padx=10, pady=10)
+        button_frame.pack(fill=tk.X, padx=16, pady=(8, 16))
         
-        ttk.Button(button_frame, text="Save Configuration", command=self._save_config).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(button_frame, text="Reload", command=self._reload_config).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Save Configuration", command=self._save_config, style="Primary.TButton").pack(side=tk.RIGHT, padx=6)
+        ttk.Button(button_frame, text="Reload", command=self._reload_config).pack(side=tk.RIGHT, padx=6)
         if self.config.mode == "hitl":
-            ttk.Button(button_frame, text="Refresh Pending", command=self._refresh_pending_actions).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text="Refresh Pending", command=self._refresh_pending_actions).pack(side=tk.LEFT, padx=6)
     
     def _create_general_tab(self):
         """Create general settings tab."""
@@ -115,9 +129,9 @@ class WatchDockGUI:
         
         # Mode selection
         mode_frame = ttk.LabelFrame(frame, text="Operation Mode")
-        mode_frame.pack(fill=tk.X, padx=10, pady=10)
+        mode_frame.pack(fill=tk.X, padx=16, pady=12)
         
-        ttk.Label(mode_frame, text="Mode:", font=("Arial", 10, "bold")).pack(anchor=tk.W, padx=5, pady=5)
+        ttk.Label(mode_frame, text="Mode:", style="Section.TLabel").pack(anchor=tk.W, padx=8, pady=6)
         
         self.mode_var = tk.StringVar(value="auto")
         mode_auto = ttk.Radiobutton(mode_frame, text="Auto Mode - Automatically organize files", 
@@ -128,8 +142,11 @@ class WatchDockGUI:
                                     variable=self.mode_var, value="hitl")
         mode_hitl.pack(anchor=tk.W, padx=20, pady=5)
         
-        ttk.Label(mode_frame, text="In HITL mode, files will be analyzed and you'll be asked to approve or reject each action.", 
-                 foreground="gray").pack(anchor=tk.W, padx=20, pady=5)
+        ttk.Label(
+            mode_frame,
+            text="In HITL mode, files are analyzed and queued for approval.",
+            style="Muted.TLabel"
+        ).pack(anchor=tk.W, padx=20, pady=6)
     
     def _create_folders_tab(self):
         """Create watched folders tab."""
@@ -137,22 +154,30 @@ class WatchDockGUI:
         self.notebook.add(frame, text="Watched Folders")
         
         # Instructions
-        ttk.Label(frame, text="Add folders to monitor for new files:", font=("Arial", 10)).pack(anchor=tk.W, padx=10, pady=10)
+        ttk.Label(frame, text="Add folders to monitor for new files:", style="Muted.TLabel").pack(anchor=tk.W, padx=16, pady=10)
         
         # Listbox with scrollbar
         list_frame = ttk.Frame(frame)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=6)
         
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         self.folders_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, height=10)
+        self.folders_listbox.configure(
+            bg="#FFFFFF",
+            fg="#111827",
+            highlightthickness=1,
+            highlightbackground="#E5E7EB",
+            selectbackground="#DCE6FF",
+            selectforeground="#111827",
+        )
         self.folders_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.folders_listbox.yview)
         
         # Folder options frame
         options_frame = ttk.LabelFrame(frame, text="Folder Options")
-        options_frame.pack(fill=tk.X, padx=10, pady=5)
+        options_frame.pack(fill=tk.X, padx=16, pady=8)
         
         self.folder_enabled_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(options_frame, text="Enabled", variable=self.folder_enabled_var).pack(side=tk.LEFT, padx=5)
@@ -162,7 +187,7 @@ class WatchDockGUI:
         
         # Buttons
         button_frame = ttk.Frame(frame)
-        button_frame.pack(fill=tk.X, padx=10, pady=10)
+        button_frame.pack(fill=tk.X, padx=16, pady=10)
         
         ttk.Button(button_frame, text="Add Folder", command=self._add_folder).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Remove Selected", command=self._remove_folder).pack(side=tk.LEFT, padx=5)
@@ -177,7 +202,7 @@ class WatchDockGUI:
         
         # Provider selection
         provider_frame = ttk.LabelFrame(frame, text="AI Provider")
-        provider_frame.pack(fill=tk.X, padx=10, pady=10)
+        provider_frame.pack(fill=tk.X, padx=16, pady=12)
         
         ttk.Label(provider_frame, text="Provider:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.ai_provider_var = tk.StringVar(value="openai")
@@ -188,7 +213,7 @@ class WatchDockGUI:
         
         # API Key
         self.api_key_frame = ttk.LabelFrame(frame, text="API Configuration")
-        self.api_key_frame.pack(fill=tk.X, padx=10, pady=10)
+        self.api_key_frame.pack(fill=tk.X, padx=16, pady=12)
         
         ttk.Label(self.api_key_frame, text="API Key:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.api_key_var = tk.StringVar()
@@ -197,7 +222,7 @@ class WatchDockGUI:
         
         # Base URL (for Ollama)
         self.base_url_frame = ttk.LabelFrame(frame, text="Base URL (for local providers)")
-        self.base_url_frame.pack(fill=tk.X, padx=10, pady=10)
+        self.base_url_frame.pack(fill=tk.X, padx=16, pady=12)
         
         ttk.Label(self.base_url_frame, text="Base URL:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.base_url_var = tk.StringVar(value="http://localhost:11434/v1")
@@ -206,7 +231,7 @@ class WatchDockGUI:
         
         # Model
         model_frame = ttk.LabelFrame(frame, text="Model")
-        model_frame.pack(fill=tk.X, padx=10, pady=10)
+        model_frame.pack(fill=tk.X, padx=16, pady=12)
         
         ttk.Label(model_frame, text="Model:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.ai_model_var = tk.StringVar(value="gpt-4")
@@ -214,7 +239,7 @@ class WatchDockGUI:
         
         # Temperature
         temp_frame = ttk.LabelFrame(frame, text="Temperature")
-        temp_frame.pack(fill=tk.X, padx=10, pady=10)
+        temp_frame.pack(fill=tk.X, padx=16, pady=12)
         
         self.temperature_var = tk.DoubleVar(value=0.3)
         temp_scale = ttk.Scale(temp_frame, from_=0.0, to=1.0, variable=self.temperature_var, orient=tk.HORIZONTAL)
@@ -232,7 +257,7 @@ class WatchDockGUI:
         
         # Archive path
         path_frame = ttk.LabelFrame(frame, text="Archive Location")
-        path_frame.pack(fill=tk.X, padx=10, pady=10)
+        path_frame.pack(fill=tk.X, padx=16, pady=12)
         
         ttk.Label(path_frame, text="Base Path:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.archive_path_var = tk.StringVar()
@@ -242,7 +267,7 @@ class WatchDockGUI:
         
         # Options
         options_frame = ttk.LabelFrame(frame, text="Organization Options")
-        options_frame.pack(fill=tk.X, padx=10, pady=10)
+        options_frame.pack(fill=tk.X, padx=16, pady=12)
         
         self.create_date_folders_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(options_frame, text="Create date folders (YYYY-MM)", 
@@ -262,23 +287,34 @@ class WatchDockGUI:
         self.notebook.add(frame, text="Few-Shot Examples")
         
         # Instructions
-        ttk.Label(frame, text="Add examples to help the AI learn your organization preferences:", 
-                 font=("Arial", 10)).pack(anchor=tk.W, padx=10, pady=10)
+        ttk.Label(
+            frame,
+            text="Add examples to help the AI learn your organization preferences:",
+            style="Muted.TLabel"
+        ).pack(anchor=tk.W, padx=16, pady=10)
         
         # Listbox
         list_frame = ttk.Frame(frame)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=6)
         
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         self.examples_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, height=8)
+        self.examples_listbox.configure(
+            bg="#FFFFFF",
+            fg="#111827",
+            highlightthickness=1,
+            highlightbackground="#E5E7EB",
+            selectbackground="#DCE6FF",
+            selectforeground="#111827",
+        )
         self.examples_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.examples_listbox.yview)
         
         # Example form
         form_frame = ttk.LabelFrame(frame, text="Example Details")
-        form_frame.pack(fill=tk.X, padx=10, pady=10)
+        form_frame.pack(fill=tk.X, padx=16, pady=12)
         
         ttk.Label(form_frame, text="Original Filename:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.example_file_var = tk.StringVar()
@@ -298,7 +334,7 @@ class WatchDockGUI:
         
         # Buttons
         button_frame = ttk.Frame(frame)
-        button_frame.pack(fill=tk.X, padx=10, pady=10)
+        button_frame.pack(fill=tk.X, padx=16, pady=10)
         
         ttk.Button(button_frame, text="Add Example", command=self._add_example).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Remove Selected", command=self._remove_example).pack(side=tk.LEFT, padx=5)
@@ -310,15 +346,18 @@ class WatchDockGUI:
         self.notebook.add(frame, text="Pending Actions")
         
         # Instructions
-        ttk.Label(frame, text="Pending file organization actions (HITL mode):", 
-                 font=("Arial", 10)).pack(anchor=tk.W, padx=10, pady=10)
+        ttk.Label(
+            frame,
+            text="Pending file organization actions (HITL mode):",
+            style="Muted.TLabel"
+        ).pack(anchor=tk.W, padx=16, pady=10)
         
         # Treeview for pending actions
         tree_frame = ttk.Frame(frame)
-        tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=6)
         
         columns = ("File", "Category", "Action", "Destination")
-        self.pending_tree = ttk.Treeview(tree_frame, columns=columns, show="tree headings", height=15)
+        self.pending_tree = ttk.Treeview(tree_frame, columns=columns, show="tree headings", height=15, style="Modern.Treeview")
         self.pending_tree.heading("#0", text="ID")
         self.pending_tree.heading("File", text="File")
         self.pending_tree.heading("Category", text="Category")
@@ -339,7 +378,7 @@ class WatchDockGUI:
         
         # Action buttons
         action_frame = ttk.Frame(frame)
-        action_frame.pack(fill=tk.X, padx=10, pady=10)
+        action_frame.pack(fill=tk.X, padx=16, pady=10)
         
         ttk.Button(action_frame, text="Approve Selected", command=self._approve_selected).pack(side=tk.LEFT, padx=5)
         ttk.Button(action_frame, text="Reject Selected", command=self._reject_selected).pack(side=tk.LEFT, padx=5)
@@ -347,8 +386,8 @@ class WatchDockGUI:
         ttk.Button(action_frame, text="Refresh", command=self._refresh_pending_actions).pack(side=tk.LEFT, padx=5)
         
         # Status label
-        self.pending_status_label = ttk.Label(frame, text="No pending actions", foreground="gray")
-        self.pending_status_label.pack(anchor=tk.W, padx=10, pady=5)
+        self.pending_status_label = ttk.Label(frame, text="No pending actions", style="Muted.TLabel")
+        self.pending_status_label.pack(anchor=tk.W, padx=16, pady=6)
     
     def _populate_ui(self):
         """Populate UI with current configuration."""
@@ -387,6 +426,72 @@ class WatchDockGUI:
         # Refresh pending actions if in HITL mode
         if self.config.mode == "hitl":
             self._refresh_pending_actions()
+
+    def _apply_theme(self):
+        """Apply a modern, neutral theme to the UI."""
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        bg = "#F7F8FB"
+        surface = "#FFFFFF"
+        text = "#111827"
+        muted = "#6B7280"
+        accent = "#4F46E5"
+        accent_hover = "#4338CA"
+        border = "#E5E7EB"
+
+        self.root.configure(background=bg)
+
+        default_font = tkfont.nametofont("TkDefaultFont")
+        default_font.configure(size=11)
+        heading_font = tkfont.Font(family=default_font.actual("family"), size=16, weight="bold")
+        subtitle_font = tkfont.Font(family=default_font.actual("family"), size=10)
+        section_font = tkfont.Font(family=default_font.actual("family"), size=11, weight="bold")
+
+        style.configure("TFrame", background=bg)
+        style.configure("Header.TFrame", background=bg)
+        style.configure("TLabel", background=bg, foreground=text)
+        style.configure("Title.TLabel", background=bg, foreground=text, font=heading_font)
+        style.configure("Subtitle.TLabel", background=bg, foreground=muted, font=subtitle_font)
+        style.configure("Section.TLabel", background=bg, foreground=text, font=section_font)
+        style.configure("Muted.TLabel", background=bg, foreground=muted)
+
+        style.configure("TLabelframe", background=bg, foreground=text)
+        style.configure("TLabelframe.Label", background=bg, foreground=muted, font=subtitle_font)
+
+        style.configure("TButton", padding=(12, 6))
+        style.configure("Primary.TButton", background=accent, foreground="#FFFFFF")
+        style.map(
+            "Primary.TButton",
+            background=[("active", accent_hover), ("pressed", accent_hover)],
+        )
+
+        style.configure("TNotebook", background=bg, borderwidth=0)
+        style.configure(
+            "TNotebook.Tab",
+            background=bg,
+            foreground=muted,
+            padding=(12, 8),
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", surface)],
+            foreground=[("selected", text)],
+        )
+
+        style.configure(
+            "Modern.Treeview",
+            background=surface,
+            fieldbackground=surface,
+            foreground=text,
+            rowheight=26,
+            bordercolor=border,
+            borderwidth=1,
+        )
+        style.map("Modern.Treeview", background=[("selected", "#DCE6FF")])
     
     def _on_provider_change(self, event=None):
         """Handle provider change."""
