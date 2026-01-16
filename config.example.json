@@ -20,6 +20,7 @@
     "move_files": true
   },
   "log_level": "INFO",
-  "check_interval": 1.0
+  "check_interval": 1.0,
+  "mode": "auto"
 }
 

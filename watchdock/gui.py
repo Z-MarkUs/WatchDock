@@ -4,6 +4,8 @@ Native GUI application for WatchDock using Tkinter.
 
 import os
 import json
+import platform
+import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from tkinter import font as tkfont
@@ -11,6 +13,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 import logging
 
+from watchdock import __version__
 from watchdock.config import WatchDockConfig, WatchedFolder, AIConfig, ArchiveConfig
 from watchdock.pending_actions import PendingActionsQueue
 
@@ -106,6 +109,7 @@ class WatchDockGUI:
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
         
         # Create tabs
+        self._create_overview_tab()
         self._create_general_tab()
         self._create_folders_tab()
         self._create_ai_tab()
@@ -121,6 +125,50 @@ class WatchDockGUI:
         ttk.Button(button_frame, text="Reload", command=self._reload_config).pack(side=tk.RIGHT, padx=6)
         if self.config.mode == "hitl":
             ttk.Button(button_frame, text="Refresh Pending", command=self._refresh_pending_actions).pack(side=tk.LEFT, padx=6)
+
+        status_frame = ttk.Frame(self.root)
+        status_frame.pack(fill=tk.X, padx=16, pady=(0, 12))
+        self.status_label = ttk.Label(status_frame, style="Muted.TLabel")
+        self.status_label.pack(anchor=tk.W)
+    def _create_overview_tab(self):
+        """Create overview tab with quick actions."""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Overview")
+
+        summary_frame = ttk.LabelFrame(frame, text="Setup Summary")
+        summary_frame.pack(fill=tk.X, padx=16, pady=12)
+
+        self.overview_labels = {}
+        rows = [
+            ("Config File", "config_path"),
+            ("Watched Folders", "watched_count"),
+            ("Mode", "mode"),
+            ("Provider", "provider"),
+            ("Model", "model"),
+        ]
+        for idx, (label_text, key) in enumerate(rows):
+            ttk.Label(summary_frame, text=label_text + ":", style="Section.TLabel").grid(
+                row=idx, column=0, sticky=tk.W, padx=8, pady=6
+            )
+            value_label = ttk.Label(summary_frame, text="-", style="Muted.TLabel")
+            value_label.grid(row=idx, column=1, sticky=tk.W, padx=8, pady=6)
+            self.overview_labels[key] = value_label
+
+        summary_frame.columnconfigure(1, weight=1)
+
+        actions_frame = ttk.LabelFrame(frame, text="Quick Actions")
+        actions_frame.pack(fill=tk.X, padx=16, pady=12)
+
+        ttk.Button(actions_frame, text="Open Config Folder", command=self._open_config_folder).pack(
+            side=tk.LEFT, padx=8, pady=8
+        )
+        ttk.Button(actions_frame, text="Open Config File", command=self._open_config_file).pack(
+            side=tk.LEFT, padx=8, pady=8
+        )
+        ttk.Button(actions_frame, text="Open Log File", command=self._open_log_file).pack(
+            side=tk.LEFT, padx=8, pady=8
+        )
+
     
     def _create_general_tab(self):
         """Create general settings tab."""
@@ -427,6 +475,8 @@ class WatchDockGUI:
         if self.config.mode == "hitl":
             self._refresh_pending_actions()
 
+        self._update_overview()
+
     def _apply_theme(self):
         """Apply a modern, neutral theme to the UI."""
         style = ttk.Style(self.root)
@@ -492,6 +542,54 @@ class WatchDockGUI:
             borderwidth=1,
         )
         style.map("Modern.Treeview", background=[("selected", "#DCE6FF")])
+
+    def _update_overview(self):
+        """Update overview and status bar."""
+        config_path = Path(DEFAULT_CONFIG_PATH)
+        watched_count = len(self.config.watched_folders)
+        provider = self.config.ai_config.provider
+        model = self.config.ai_config.model
+        mode = self.config.mode
+
+        if hasattr(self, "overview_labels"):
+            self.overview_labels["config_path"].config(text=str(config_path))
+            self.overview_labels["watched_count"].config(text=str(watched_count))
+            self.overview_labels["mode"].config(text=mode)
+            self.overview_labels["provider"].config(text=provider)
+            self.overview_labels["model"].config(text=model)
+
+        if hasattr(self, "status_label"):
+            self.status_label.config(
+                text=f"Config: {config_path}  |  Mode: {mode}  |  Provider: {provider}  |  Model: {model}  |  v{__version__}"
+            )
+
+    def _open_path(self, path: Path):
+        """Open a file or folder in the OS file manager."""
+        try:
+            if platform.system() == "Windows":
+                os.startfile(str(path))  # type: ignore[attr-defined]
+            elif platform.system() == "Darwin":
+                subprocess.run(["open", str(path)], check=False)
+            else:
+                subprocess.run(["xdg-open", str(path)], check=False)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open: {path}\n{e}")
+
+    def _open_config_folder(self):
+        """Open the config folder."""
+        self._open_path(Path(DEFAULT_CONFIG_PATH).parent)
+
+    def _open_config_file(self):
+        """Open the config file."""
+        self._open_path(Path(DEFAULT_CONFIG_PATH))
+
+    def _open_log_file(self):
+        """Open the log file if it exists."""
+        log_path = Path.cwd() / "watchdock.log"
+        if not log_path.exists():
+            messagebox.showinfo("Info", f"No log file found at {log_path}")
+            return
+        self._open_path(log_path)
     
     def _on_provider_change(self, event=None):
         """Handle provider change."""

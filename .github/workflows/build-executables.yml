@@ -40,26 +40,26 @@ jobs:
     - name: Build executable (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: |
-        pyinstaller --name=watchdock-0.1.0-linux --onefile watchdock/main.py
-        pyinstaller --name=WatchDock-0.1.0-linux --windowed --onefile watchdock/gui_main.py
+        pyinstaller --name=watchdock-0.1.1-linux --onefile watchdock/main.py
+        pyinstaller --name=WatchDock-0.1.1-linux --windowed --onefile watchdock/gui_main.py
     
     - name: Build executable (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        pyinstaller --name=watchdock-0.1.0-windows --onefile watchdock/main.py
-        pyinstaller --name=WatchDock-0.1.0-windows --windowed --onefile watchdock/gui_main.py
+        pyinstaller --name=watchdock-0.1.1-windows --onefile watchdock/main.py
+        pyinstaller --name=WatchDock-0.1.1-windows --windowed --onefile watchdock/gui_main.py
     
     - name: Build executable (macOS - Apple Silicon)
       if: matrix.os == 'macos-latest'
       run: |
-        pyinstaller --name=watchdock-0.1.0-arm64 --onefile watchdock/main.py
-        pyinstaller --name=WatchDock-0.1.0-arm64 --windowed --onefile watchdock/gui_main.py
+        pyinstaller --name=watchdock-0.1.1-arm64 --onefile watchdock/main.py
+        pyinstaller --name=WatchDock-0.1.1-arm64 --windowed --onefile watchdock/gui_main.py
     
     - name: Build executable (macOS - Intel)
       if: matrix.os == 'macos-13'
       run: |
-        pyinstaller --name=watchdock-0.1.0-intel --onefile watchdock/main.py
-        pyinstaller --name=WatchDock-0.1.0-intel --windowed --onefile watchdock/gui_main.py
+        pyinstaller --name=watchdock-0.1.1-intel --onefile watchdock/main.py
+        pyinstaller --name=WatchDock-0.1.1-intel --windowed --onefile watchdock/gui_main.py
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
