@@ -21,7 +21,7 @@ if requirements_file.exists():
 
 setup(
     name="watchdock",
-    version="0.1.4",
+    version="0.1.5",
     description="A local, self-hosted file monitoring and organization tool using AI",
     long_description=long_description,
     long_description_content_type="text/markdown",

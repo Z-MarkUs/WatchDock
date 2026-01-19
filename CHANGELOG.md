@@ -5,6 +5,16 @@ All notable changes to WatchDock will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-01-19
+
+### Fixed
+- GUI: reduce/avoid native focus highlight “flash” (white/grey) when clicking in the window
+
+### Changed
+- CLI: `watchdock version` now also checks PyPI and reports whether an update is available
+- CLI: `watchdock update` now installs the update directly (removed `update --install`)
+- Docs: updated README to match the new CLI behavior
+
 ## [0.1.4] - 2026-01-16
 
 ### Fixed

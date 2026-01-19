@@ -118,11 +118,8 @@ wd update
 # Show version
 watchdock version
 
-# Check for updates
+# Update WatchDock (installs the latest version if available)
 watchdock update
-
-# Install update if available
-watchdock update --install
 
 # Show current status
 watchdock status
