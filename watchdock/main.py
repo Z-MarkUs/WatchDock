@@ -92,8 +92,8 @@ class WatchDock:
             print(f"   Category: {action.analysis.get('category', 'Unknown')}")
             print(f"   Suggested name: {action.proposed_action.get('new_name', 'N/A')}")
             print(f"   Action ID: {action.action_id}")
-            print(f"   Use 'watchdock --approve {action.action_id}' to approve")
-            print(f"   Use 'watchdock --reject {action.action_id}' to reject\n")
+            print(f"   Use 'watchdock approve {action.action_id}' to approve")
+            print(f"   Use 'watchdock reject {action.action_id}' to reject\n")
         except Exception as e:
             logger.debug(f"Could not send notification: {e}")
     
