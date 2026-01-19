@@ -1,5 +1,6 @@
 """
 Native GUI application for WatchDock using Tkinter.
+Modern ChatGPT/Cursor-style design with sidebar navigation.
 """
 
 import os
@@ -24,28 +25,56 @@ FEW_SHOT_EXAMPLES_PATH = str(Path.home() / '.watchdock' / 'few_shot_examples.jso
 
 
 class WatchDockGUI:
-    """Main GUI application for WatchDock."""
+    """Main GUI application for WatchDock with modern sidebar design."""
     
     def __init__(self, root):
         self.root = root
-        self.root.title("WatchDock - File Organization Tool")
-        self.root.geometry("880x720")
+        self.root.title("WatchDock")
+        self.root.geometry("1200x800")
         self.root.resizable(True, True)
-        self.root.minsize(860, 680)
+        self.root.minsize(1000, 700)
 
-        self._apply_theme()
+        # Dark theme colors (ChatGPT/Cursor style)
+        self.colors = {
+            'bg': '#1E1E1E',           # Main background (dark gray)
+            'sidebar': '#252526',       # Sidebar background
+            'card': '#2D2D30',          # Card background
+            'card_border': '#3E3E42',   # Card border
+            'text': '#CCCCCC',          # Primary text
+            'text_muted': '#858585',     # Muted text
+            'text_bright': '#FFFFFF',   # Bright text
+            'accent': '#007ACC',        # Accent blue
+            'accent_hover': '#0098FF',  # Accent hover
+            'hover': '#2A2D2E',         # Hover background
+            'selected': '#094771',      # Selected item
+            'input_bg': '#3C3C3C',      # Input background
+            'input_border': '#454545',  # Input border
+            'success': '#4EC9B0',       # Success green
+            'warning': '#CE9178',       # Warning orange
+        }
         
-        # Try to set window icon (if available)
-        try:
-            # You can add an icon file later
-            pass
-        except:
-            pass
+        self.root.configure(bg=self.colors['bg'])
+        
+        # Setup fonts (cross-platform compatible)
+        default_font = tkfont.nametofont("TkDefaultFont")
+        font_family = default_font.actual("family")
+        self.fonts = {
+            'title': tkfont.Font(family=font_family, size=24, weight="bold"),
+            'heading': tkfont.Font(family=font_family, size=20, weight="bold"),
+            'subtitle': tkfont.Font(family=font_family, size=10),
+            'body': tkfont.Font(family=font_family, size=10),
+            'body_bold': tkfont.Font(family=font_family, size=10, weight="bold"),
+            'small': tkfont.Font(family=font_family, size=9),
+            'nav': tkfont.Font(family=font_family, size=11),
+        }
         
         # Load configuration
         self.config = self._load_config()
         self.few_shot_examples = self._load_few_shot_examples()
         self.pending_queue = PendingActionsQueue()
+        
+        # Current view
+        self.current_view = "overview"
         
         # Create UI
         self._create_ui()
@@ -54,7 +83,7 @@ class WatchDockGUI:
         # Auto-refresh pending actions if in HITL mode
         if self.config.mode == "hitl":
             self._refresh_pending_actions()
-            self.root.after(5000, self._auto_refresh_pending)  # Refresh every 5 seconds
+            self.root.after(5000, self._auto_refresh_pending)
     
     def _load_config(self) -> WatchDockConfig:
         """Load configuration from file."""
@@ -75,69 +104,251 @@ class WatchDockGUI:
             logger.error(f"Error loading examples: {e}")
         return []
     
-    def _save_config(self):
-        """Save configuration to file."""
-        try:
-            config_path = Path(DEFAULT_CONFIG_PATH)
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            self.config.save(DEFAULT_CONFIG_PATH)
-            
-            # Save few-shot examples
-            examples_path = Path(FEW_SHOT_EXAMPLES_PATH)
-            examples_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(FEW_SHOT_EXAMPLES_PATH, 'w') as f:
-                json.dump(self.few_shot_examples, f, indent=2)
-            
-            messagebox.showinfo("Success", "Configuration saved successfully!")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to save configuration: {e}")
-    
     def _create_ui(self):
-        """Create the UI components."""
-        header = ttk.Frame(self.root, style="Header.TFrame")
-        header.pack(fill=tk.X, padx=16, pady=(16, 8))
-
-        ttk.Label(header, text="WatchDock", style="Title.TLabel").pack(anchor=tk.W)
-        ttk.Label(
+        """Create the UI with sidebar navigation."""
+        # Main container
+        main_container = tk.Frame(self.root, bg=self.colors['bg'])
+        main_container.pack(fill=tk.BOTH, expand=True)
+        
+        # Sidebar
+        self._create_sidebar(main_container)
+        
+        # Content area
+        self.content_frame = tk.Frame(main_container, bg=self.colors['bg'])
+        self.content_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        
+        # Header in content area
+        self._create_header()
+        
+        # View container (scrollable)
+        self.view_container = tk.Frame(self.content_frame, bg=self.colors['bg'])
+        self.view_container.pack(fill=tk.BOTH, expand=True, padx=24, pady=16)
+        
+        # Create all views (hidden initially)
+        self.views = {}
+        self._create_overview_view()
+        self._create_general_view()
+        self._create_folders_view()
+        self._create_ai_view()
+        self._create_archive_view()
+        self._create_examples_view()
+        self._create_pending_view()
+        
+        # Show overview by default
+        self._show_view("overview")
+        
+        # Footer with status and actions
+        self._create_footer()
+    
+    def _create_sidebar(self, parent):
+        """Create sidebar navigation."""
+        sidebar = tk.Frame(parent, bg=self.colors['sidebar'], width=240)
+        sidebar.pack(side=tk.LEFT, fill=tk.Y)
+        sidebar.pack_propagate(False)
+        
+        # Logo/Title area
+        logo_frame = tk.Frame(sidebar, bg=self.colors['sidebar'], height=80)
+        logo_frame.pack(fill=tk.X, pady=(20, 10))
+        
+        title_label = tk.Label(
+            logo_frame,
+            text="WatchDock",
+            font=self.fonts['heading'],
+            bg=self.colors['sidebar'],
+            fg=self.colors['text_bright']
+        )
+        title_label.pack(pady=(10, 0))
+        
+        subtitle_label = tk.Label(
+            logo_frame,
+            text="AI File Organizer",
+            font=self.fonts['subtitle'],
+            bg=self.colors['sidebar'],
+            fg=self.colors['text_muted']
+        )
+        subtitle_label.pack()
+        
+        # Navigation items
+        nav_items = [
+            ("overview", "Overview", "📊"),
+            ("general", "General", "⚙️"),
+            ("folders", "Watched Folders", "📁"),
+            ("ai", "AI Settings", "🤖"),
+            ("archive", "Archive", "🗄️"),
+            ("examples", "Examples", "📚"),
+            ("pending", "Pending Actions", "⏳"),
+        ]
+        
+        self.nav_buttons = {}
+        for view_id, label, icon in nav_items:
+            btn = tk.Button(
+                sidebar,
+                text=f"  {icon}  {label}",
+                font=self.fonts['nav'],
+                bg=self.colors['sidebar'],
+                fg=self.colors['text'],
+                activebackground=self.colors['hover'],
+                activeforeground=self.colors['text_bright'],
+                relief=tk.FLAT,
+                anchor=tk.W,
+                padx=20,
+                pady=12,
+                command=lambda v=view_id: self._show_view(v)
+            )
+            btn.pack(fill=tk.X, padx=8, pady=2)
+            self.nav_buttons[view_id] = btn
+        
+        # Version at bottom
+        version_label = tk.Label(
+            sidebar,
+            text=f"v{__version__}",
+            font=self.fonts['small'],
+            bg=self.colors['sidebar'],
+            fg=self.colors['text_muted']
+        )
+        version_label.pack(side=tk.BOTTOM, pady=16)
+    
+    def _create_header(self):
+        """Create header in content area."""
+        header = tk.Frame(self.content_frame, bg=self.colors['bg'], height=60)
+        header.pack(fill=tk.X, padx=24, pady=(16, 0))
+        header.pack_propagate(False)
+        
+        # Title (will be updated per view)
+        self.header_title = tk.Label(
             header,
-            text="Smart file organization with AI",
-            style="Subtitle.TLabel"
-        ).pack(anchor=tk.W, pady=(2, 0))
-
-        # Create notebook (tabs)
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
+            text="Overview",
+            font=self.fonts['title'],
+            bg=self.colors['bg'],
+            fg=self.colors['text_bright']
+        )
+        self.header_title.pack(side=tk.LEFT, pady=16)
+    
+    def _create_footer(self):
+        """Create footer with status and save button."""
+        footer = tk.Frame(self.content_frame, bg=self.colors['bg'], height=60)
+        footer.pack(fill=tk.X, side=tk.BOTTOM, padx=24, pady=(0, 16))
+        footer.pack_propagate(False)
         
-        # Create tabs
-        self._create_overview_tab()
-        self._create_general_tab()
-        self._create_folders_tab()
-        self._create_ai_tab()
-        self._create_archive_tab()
-        self._create_examples_tab()
-        self._create_pending_tab()
+        # Status
+        self.status_label = tk.Label(
+            footer,
+            text="",
+            font=self.fonts['small'],
+            bg=self.colors['bg'],
+            fg=self.colors['text_muted']
+        )
+        self.status_label.pack(side=tk.LEFT, pady=16)
         
-        # Create bottom buttons
-        button_frame = ttk.Frame(self.root)
-        button_frame.pack(fill=tk.X, padx=16, pady=(8, 16))
+        # Action buttons
+        btn_frame = tk.Frame(footer, bg=self.colors['bg'])
+        btn_frame.pack(side=tk.RIGHT, pady=16)
         
-        ttk.Button(button_frame, text="Save Configuration", command=self._save_config, style="Primary.TButton").pack(side=tk.RIGHT, padx=6)
-        ttk.Button(button_frame, text="Reload", command=self._reload_config).pack(side=tk.RIGHT, padx=6)
-        if self.config.mode == "hitl":
-            ttk.Button(button_frame, text="Refresh Pending", command=self._refresh_pending_actions).pack(side=tk.LEFT, padx=6)
-
-        status_frame = ttk.Frame(self.root)
-        status_frame.pack(fill=tk.X, padx=16, pady=(0, 12))
-        self.status_label = ttk.Label(status_frame, style="Muted.TLabel")
-        self.status_label.pack(anchor=tk.W)
-    def _create_overview_tab(self):
-        """Create overview tab with quick actions."""
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Overview")
-
-        summary_frame = ttk.LabelFrame(frame, text="Setup Summary")
-        summary_frame.pack(fill=tk.X, padx=16, pady=12)
-
+        reload_btn = self._create_button(btn_frame, "Reload", self._reload_config, secondary=True)
+        reload_btn.pack(side=tk.LEFT, padx=8)
+        
+        save_btn = self._create_button(btn_frame, "Save Configuration", self._save_config)
+        save_btn.pack(side=tk.LEFT, padx=8)
+    
+    def _create_card(self, parent, title=None):
+        """Create a modern card container."""
+        card = tk.Frame(parent, bg=self.colors['card'], relief=tk.FLAT, bd=1)
+        if title:
+            title_label = tk.Label(
+                card,
+                text=title,
+                font=self.fonts['body_bold'],
+                bg=self.colors['card'],
+                fg=self.colors['text_bright'],
+                anchor=tk.W
+            )
+            title_label.pack(fill=tk.X, padx=20, pady=(16, 8))
+        return card
+    
+    def _create_button(self, parent, text, command, secondary=False):
+        """Create a modern button."""
+        bg = self.colors['accent'] if not secondary else self.colors['card']
+        fg = self.colors['text_bright'] if not secondary else self.colors['text']
+        hover_bg = self.colors['accent_hover'] if not secondary else self.colors['hover']
+        
+        btn = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            font=self.fonts['body'],
+            bg=bg,
+            fg=fg,
+            activebackground=hover_bg,
+            activeforeground=fg,
+            relief=tk.FLAT,
+            padx=20,
+            pady=10,
+            cursor="hand2"
+        )
+        return btn
+    
+    def _create_entry(self, parent, width=50):
+        """Create a modern entry field."""
+        entry = tk.Entry(
+            parent,
+            font=self.fonts['body'],
+            bg=self.colors['input_bg'],
+            fg=self.colors['text'],
+            insertbackground=self.colors['text'],
+            relief=tk.FLAT,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=self.colors['input_border'],
+            highlightcolor=self.colors['accent'],
+            width=width
+        )
+        return entry
+    
+    def _show_view(self, view_id):
+        """Show a specific view and update navigation."""
+        # Hide all views
+        for view in self.views.values():
+            view.pack_forget()
+        
+        # Show selected view
+        if view_id in self.views:
+            self.views[view_id].pack(fill=tk.BOTH, expand=True)
+            self.current_view = view_id
+        
+        # Update navigation highlighting
+        for nav_id, btn in self.nav_buttons.items():
+            if nav_id == view_id:
+                btn.configure(bg=self.colors['selected'], fg=self.colors['text_bright'])
+            else:
+                btn.configure(bg=self.colors['sidebar'], fg=self.colors['text'])
+        
+        # Update header title
+        titles = {
+            'overview': 'Overview',
+            'general': 'General Settings',
+            'folders': 'Watched Folders',
+            'ai': 'AI Configuration',
+            'archive': 'Archive Settings',
+            'examples': 'Few-Shot Examples',
+            'pending': 'Pending Actions',
+        }
+        self.header_title.config(text=titles.get(view_id, 'WatchDock'))
+        
+        # Update status
+        self._update_status()
+    
+    def _create_overview_view(self):
+        """Create overview view."""
+        frame = tk.Frame(self.view_container, bg=self.colors['bg'])
+        self.views['overview'] = frame
+        
+        # Summary card
+        summary_card = self._create_card(frame, "Configuration Summary")
+        summary_card.pack(fill=tk.X, pady=(0, 16))
+        
+        summary_content = tk.Frame(summary_card, bg=self.colors['card'])
+        summary_content.pack(fill=tk.X, padx=20, pady=(0, 16))
+        
         self.overview_labels = {}
         rows = [
             ("Config File", "config_path"),
@@ -146,266 +357,531 @@ class WatchDockGUI:
             ("Provider", "provider"),
             ("Model", "model"),
         ]
+        
         for idx, (label_text, key) in enumerate(rows):
-            ttk.Label(summary_frame, text=label_text + ":", style="Section.TLabel").grid(
-                row=idx, column=0, sticky=tk.W, padx=8, pady=6
+            row = tk.Frame(summary_content, bg=self.colors['card'])
+            row.pack(fill=tk.X, pady=8)
+            
+            label = tk.Label(
+                row,
+                text=label_text + ":",
+                font=self.fonts['body'],
+                bg=self.colors['card'],
+                fg=self.colors['text_muted'],
+                width=16,
+                anchor=tk.W
             )
-            value_label = ttk.Label(summary_frame, text="-", style="Muted.TLabel")
-            value_label.grid(row=idx, column=1, sticky=tk.W, padx=8, pady=6)
+            label.pack(side=tk.LEFT)
+            
+            value_label = tk.Label(
+                row,
+                text="-",
+                font=self.fonts['body'],
+                bg=self.colors['card'],
+                fg=self.colors['text'],
+                anchor=tk.W
+            )
+            value_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
             self.overview_labels[key] = value_label
-
-        summary_frame.columnconfigure(1, weight=1)
-
-        actions_frame = ttk.LabelFrame(frame, text="Quick Actions")
-        actions_frame.pack(fill=tk.X, padx=16, pady=12)
-
-        ttk.Button(actions_frame, text="Open Config Folder", command=self._open_config_folder).pack(
-            side=tk.LEFT, padx=8, pady=8
-        )
-        ttk.Button(actions_frame, text="Open Config File", command=self._open_config_file).pack(
-            side=tk.LEFT, padx=8, pady=8
-        )
-        ttk.Button(actions_frame, text="Open Log File", command=self._open_log_file).pack(
-            side=tk.LEFT, padx=8, pady=8
-        )
-
+        
+        # Quick actions card
+        actions_card = self._create_card(frame, "Quick Actions")
+        actions_card.pack(fill=tk.X)
+        
+        actions_content = tk.Frame(actions_card, bg=self.colors['card'])
+        actions_content.pack(fill=tk.X, padx=20, pady=(0, 16))
+        
+        ttk.Button(
+            actions_content,
+            text="Open Config Folder",
+            command=self._open_config_folder
+        ).pack(side=tk.LEFT, padx=8, pady=12)
+        
+        ttk.Button(
+            actions_content,
+            text="Open Config File",
+            command=self._open_config_file
+        ).pack(side=tk.LEFT, padx=8, pady=12)
+        
+        ttk.Button(
+            actions_content,
+            text="Open Log File",
+            command=self._open_log_file
+        ).pack(side=tk.LEFT, padx=8, pady=12)
     
-    def _create_general_tab(self):
-        """Create general settings tab."""
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="General")
+    def _create_general_view(self):
+        """Create general settings view."""
+        frame = tk.Frame(self.view_container, bg=self.colors['bg'])
+        self.views['general'] = frame
         
-        # Mode selection
-        mode_frame = ttk.LabelFrame(frame, text="Operation Mode")
-        mode_frame.pack(fill=tk.X, padx=16, pady=12)
+        card = self._create_card(frame, "Operation Mode")
+        card.pack(fill=tk.X)
         
-        ttk.Label(mode_frame, text="Mode:", style="Section.TLabel").pack(anchor=tk.W, padx=8, pady=6)
+        content = tk.Frame(card, bg=self.colors['card'])
+        content.pack(fill=tk.X, padx=20, pady=(0, 16))
         
         self.mode_var = tk.StringVar(value="auto")
-        mode_auto = ttk.Radiobutton(mode_frame, text="Auto Mode - Automatically organize files", 
-                                    variable=self.mode_var, value="auto")
-        mode_auto.pack(anchor=tk.W, padx=20, pady=5)
         
-        mode_hitl = ttk.Radiobutton(mode_frame, text="HITL Mode - Request approval before organizing", 
-                                    variable=self.mode_var, value="hitl")
-        mode_hitl.pack(anchor=tk.W, padx=20, pady=5)
+        mode_frame = tk.Frame(content, bg=self.colors['card'])
+        mode_frame.pack(fill=tk.X, pady=12)
         
-        ttk.Label(
+        auto_radio = tk.Radiobutton(
+            mode_frame,
+            text="Auto Mode - Automatically organize files",
+            variable=self.mode_var,
+            value="auto",
+            font=self.fonts['body'],
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            selectcolor=self.colors['card'],
+            activebackground=self.colors['card'],
+            activeforeground=self.colors['text'],
+            cursor="hand2"
+        )
+        auto_radio.pack(anchor=tk.W, pady=8)
+        
+        hitl_radio = tk.Radiobutton(
+            mode_frame,
+            text="HITL Mode - Request approval before organizing",
+            variable=self.mode_var,
+            value="hitl",
+            font=self.fonts['body'],
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            selectcolor=self.colors['card'],
+            activebackground=self.colors['card'],
+            activeforeground=self.colors['text'],
+            cursor="hand2"
+        )
+        hitl_radio.pack(anchor=tk.W, pady=8)
+        
+        desc_label = tk.Label(
             mode_frame,
             text="In HITL mode, files are analyzed and queued for approval.",
-            style="Muted.TLabel"
-        ).pack(anchor=tk.W, padx=20, pady=6)
+            font=self.fonts['small'],
+            bg=self.colors['card'],
+            fg=self.colors['text_muted']
+        )
+        desc_label.pack(anchor=tk.W, pady=(4, 0))
     
-    def _create_folders_tab(self):
-        """Create watched folders tab."""
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Watched Folders")
+    def _create_folders_view(self):
+        """Create watched folders view."""
+        frame = tk.Frame(self.view_container, bg=self.colors['bg'])
+        self.views['folders'] = frame
         
         # Instructions
-        ttk.Label(frame, text="Add folders to monitor for new files:", style="Muted.TLabel").pack(anchor=tk.W, padx=16, pady=10)
+        desc = tk.Label(
+            frame,
+            text="Add folders to monitor for new files",
+            font=self.fonts['body'],
+            bg=self.colors['bg'],
+            fg=self.colors['text_muted']
+        )
+        desc.pack(anchor=tk.W, pady=(0, 16))
         
-        # Listbox with scrollbar
-        list_frame = ttk.Frame(frame)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=6)
+        # List card
+        list_card = self._create_card(frame)
+        list_card.pack(fill=tk.BOTH, expand=True, pady=(0, 16))
         
-        scrollbar = ttk.Scrollbar(list_frame)
+        list_content = tk.Frame(list_card, bg=self.colors['card'])
+        list_content.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
+        
+        scrollbar = tk.Scrollbar(list_content)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        self.folders_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, height=10)
-        self.folders_listbox.configure(
-            bg="#FFFFFF",
-            fg="#111827",
-            highlightthickness=1,
-            highlightbackground="#E5E7EB",
-            selectbackground="#DCE6FF",
-            selectforeground="#111827",
+        self.folders_listbox = tk.Listbox(
+            list_content,
+            yscrollcommand=scrollbar.set,
+            font=self.fonts['body'],
+            bg=self.colors['input_bg'],
+            fg=self.colors['text'],
+            selectbackground=self.colors['selected'],
+            selectforeground=self.colors['text_bright'],
+            relief=tk.FLAT,
+            bd=0,
+            highlightthickness=0
         )
         self.folders_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.folders_listbox.yview)
         
-        # Folder options frame
-        options_frame = ttk.LabelFrame(frame, text="Folder Options")
-        options_frame.pack(fill=tk.X, padx=16, pady=8)
+        # Options and buttons
+        options_card = self._create_card(frame)
+        options_card.pack(fill=tk.X)
+        
+        options_content = tk.Frame(options_card, bg=self.colors['card'])
+        options_content.pack(fill=tk.X, padx=20, pady=16)
         
         self.folder_enabled_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="Enabled", variable=self.folder_enabled_var).pack(side=tk.LEFT, padx=5)
+        enabled_cb = tk.Checkbutton(
+            options_content,
+            text="Enabled",
+            variable=self.folder_enabled_var,
+            font=self.fonts['body'],
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            selectcolor=self.colors['card'],
+            activebackground=self.colors['card'],
+            activeforeground=self.colors['text'],
+            cursor="hand2"
+        )
+        enabled_cb.pack(side=tk.LEFT, padx=8)
         
         self.folder_recursive_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(options_frame, text="Recursive (watch subfolders)", variable=self.folder_recursive_var).pack(side=tk.LEFT, padx=5)
+        recursive_cb = tk.Checkbutton(
+            options_content,
+            text="Recursive (watch subfolders)",
+            variable=self.folder_recursive_var,
+            font=self.fonts['body'],
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            selectcolor=self.colors['card'],
+            activebackground=self.colors['card'],
+            activeforeground=self.colors['text'],
+            cursor="hand2"
+        )
+        recursive_cb.pack(side=tk.LEFT, padx=8)
         
-        # Buttons
-        button_frame = ttk.Frame(frame)
-        button_frame.pack(fill=tk.X, padx=16, pady=10)
+        btn_frame = tk.Frame(options_content, bg=self.colors['card'])
+        btn_frame.pack(side=tk.RIGHT)
         
-        ttk.Button(button_frame, text="Add Folder", command=self._add_folder).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Remove Selected", command=self._remove_folder).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Browse...", command=self._browse_folder).pack(side=tk.LEFT, padx=5)
+        self._create_button(btn_frame, "Add Folder", self._add_folder, secondary=True).pack(side=tk.LEFT, padx=4)
+        self._create_button(btn_frame, "Remove", self._remove_folder, secondary=True).pack(side=tk.LEFT, padx=4)
+        self._create_button(btn_frame, "Browse", self._browse_folder, secondary=True).pack(side=tk.LEFT, padx=4)
         
         self.folders_data = []
     
-    def _create_ai_tab(self):
-        """Create AI settings tab."""
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="AI Settings")
+    def _create_ai_view(self):
+        """Create AI settings view."""
+        frame = tk.Frame(self.view_container, bg=self.colors['bg'])
+        self.views['ai'] = frame
         
-        # Provider selection
-        provider_frame = ttk.LabelFrame(frame, text="AI Provider")
-        provider_frame.pack(fill=tk.X, padx=16, pady=12)
+        # Provider card
+        provider_card = self._create_card(frame, "AI Provider")
+        provider_card.pack(fill=tk.X, pady=(0, 16))
         
-        ttk.Label(provider_frame, text="Provider:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        provider_content = tk.Frame(provider_card, bg=self.colors['card'])
+        provider_content.pack(fill=tk.X, padx=20, pady=(0, 16))
+        
+        tk.Label(
+            provider_content,
+            text="Provider:",
+            font=self.fonts['body'],
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            width=12,
+            anchor=tk.W
+        ).grid(row=0, column=0, sticky=tk.W, pady=12)
+        
         self.ai_provider_var = tk.StringVar(value="openai")
-        provider_combo = ttk.Combobox(provider_frame, textvariable=self.ai_provider_var, 
-                                      values=["openai", "anthropic", "ollama"], state="readonly", width=30)
-        provider_combo.grid(row=0, column=1, padx=5, pady=5)
+        provider_combo = ttk.Combobox(
+            provider_content,
+            textvariable=self.ai_provider_var,
+            values=["openai", "anthropic", "ollama"],
+            state="readonly",
+            width=30,
+            font=("SF Pro Display", 10)
+        )
+        provider_combo.grid(row=0, column=1, sticky=tk.W, pady=12, padx=8)
         provider_combo.bind("<<ComboboxSelected>>", self._on_provider_change)
         
-        # API Key
-        self.api_key_frame = ttk.LabelFrame(frame, text="API Configuration")
-        self.api_key_frame.pack(fill=tk.X, padx=16, pady=12)
+        # API Key card
+        self.api_key_card = self._create_card(frame, "API Configuration")
+        self.api_key_card.pack(fill=tk.X, pady=(0, 16))
         
-        ttk.Label(self.api_key_frame, text="API Key:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        api_key_content = tk.Frame(self.api_key_card, bg=self.colors['card'])
+        api_key_content.pack(fill=tk.X, padx=20, pady=(0, 16))
+        
+        tk.Label(
+            api_key_content,
+            text="API Key:",
+            font=self.fonts['body'],
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            width=12,
+            anchor=tk.W
+        ).grid(row=0, column=0, sticky=tk.W, pady=12)
+        
         self.api_key_var = tk.StringVar()
-        api_key_entry = ttk.Entry(self.api_key_frame, textvariable=self.api_key_var, width=50, show="*")
-        api_key_entry.grid(row=0, column=1, padx=5, pady=5)
+        api_key_entry = self._create_entry(api_key_content, width=50)
+        api_key_entry.config(show="*")
+        api_key_entry.grid(row=0, column=1, sticky=tk.W, pady=12, padx=8)
+        api_key_entry.config(textvariable=self.api_key_var)
         
-        # Base URL (for Ollama)
-        self.base_url_frame = ttk.LabelFrame(frame, text="Base URL (for local providers)")
-        self.base_url_frame.pack(fill=tk.X, padx=16, pady=12)
+        # Base URL card (for Ollama)
+        self.base_url_card = self._create_card(frame, "Base URL (for local providers)")
+        self.base_url_card.pack(fill=tk.X, pady=(0, 16))
         
-        ttk.Label(self.base_url_frame, text="Base URL:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        base_url_content = tk.Frame(self.base_url_card, bg=self.colors['card'])
+        base_url_content.pack(fill=tk.X, padx=20, pady=(0, 16))
+        
+        tk.Label(
+            base_url_content,
+            text="Base URL:",
+            font=self.fonts['body'],
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            width=12,
+            anchor=tk.W
+        ).grid(row=0, column=0, sticky=tk.W, pady=12)
+        
         self.base_url_var = tk.StringVar(value="http://localhost:11434/v1")
-        ttk.Entry(self.base_url_frame, textvariable=self.base_url_var, width=50).grid(row=0, column=1, padx=5, pady=5)
-        self.base_url_frame.pack_forget()  # Hide by default
+        base_url_entry = self._create_entry(base_url_content, width=50)
+        base_url_entry.grid(row=0, column=1, sticky=tk.W, pady=12, padx=8)
+        base_url_entry.config(textvariable=self.base_url_var)
+        self.base_url_card.pack_forget()  # Hide by default
         
-        # Model
-        model_frame = ttk.LabelFrame(frame, text="Model")
-        model_frame.pack(fill=tk.X, padx=16, pady=12)
+        # Model card
+        model_card = self._create_card(frame, "Model")
+        model_card.pack(fill=tk.X, pady=(0, 16))
         
-        ttk.Label(model_frame, text="Model:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        model_content = tk.Frame(model_card, bg=self.colors['card'])
+        model_content.pack(fill=tk.X, padx=20, pady=(0, 16))
+        
+        tk.Label(
+            model_content,
+            text="Model:",
+            font=self.fonts['body'],
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            width=12,
+            anchor=tk.W
+        ).grid(row=0, column=0, sticky=tk.W, pady=12)
+        
         self.ai_model_var = tk.StringVar(value="gpt-4")
-        ttk.Entry(model_frame, textvariable=self.ai_model_var, width=50).grid(row=0, column=1, padx=5, pady=5)
+        model_entry = self._create_entry(model_content, width=50)
+        model_entry.grid(row=0, column=1, sticky=tk.W, pady=12, padx=8)
+        model_entry.config(textvariable=self.ai_model_var)
         
-        # Temperature
-        temp_frame = ttk.LabelFrame(frame, text="Temperature")
-        temp_frame.pack(fill=tk.X, padx=16, pady=12)
+        # Temperature card
+        temp_card = self._create_card(frame, "Temperature")
+        temp_card.pack(fill=tk.X)
+        
+        temp_content = tk.Frame(temp_card, bg=self.colors['card'])
+        temp_content.pack(fill=tk.X, padx=20, pady=(0, 16))
         
         self.temperature_var = tk.DoubleVar(value=0.3)
-        temp_scale = ttk.Scale(temp_frame, from_=0.0, to=1.0, variable=self.temperature_var, orient=tk.HORIZONTAL)
-        temp_scale.grid(row=0, column=0, padx=5, pady=5, sticky=tk.EW)
-        temp_frame.columnconfigure(0, weight=1)
+        temp_scale = tk.Scale(
+            temp_content,
+            from_=0.0,
+            to=1.0,
+            variable=self.temperature_var,
+            orient=tk.HORIZONTAL,
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            troughcolor=self.colors['input_bg'],
+            activebackground=self.colors['accent'],
+            highlightthickness=0,
+            length=400
+        )
+        temp_scale.grid(row=0, column=0, sticky=tk.W, pady=12)
         
-        self.temp_label = ttk.Label(temp_frame, text="0.3")
-        self.temp_label.grid(row=0, column=1, padx=5, pady=5)
-        temp_scale.configure(command=lambda v: self.temp_label.config(text=f"{float(v):.1f}"))
+        self.temp_label = tk.Label(
+            temp_content,
+            text="0.3",
+            font=self.fonts['body'],
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            width=6
+        )
+        self.temp_label.grid(row=0, column=1, pady=12, padx=8)
+        temp_scale.config(command=lambda v: self.temp_label.config(text=f"{float(v):.1f}"))
     
-    def _create_archive_tab(self):
-        """Create archive settings tab."""
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Archive Settings")
+    def _create_archive_view(self):
+        """Create archive settings view."""
+        frame = tk.Frame(self.view_container, bg=self.colors['bg'])
+        self.views['archive'] = frame
         
-        # Archive path
-        path_frame = ttk.LabelFrame(frame, text="Archive Location")
-        path_frame.pack(fill=tk.X, padx=16, pady=12)
+        # Archive path card
+        path_card = self._create_card(frame, "Archive Location")
+        path_card.pack(fill=tk.X, pady=(0, 16))
         
-        ttk.Label(path_frame, text="Base Path:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        path_content = tk.Frame(path_card, bg=self.colors['card'])
+        path_content.pack(fill=tk.X, padx=20, pady=(0, 16))
+        
+        tk.Label(
+            path_content,
+            text="Base Path:",
+            font=self.fonts['body'],
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            width=12,
+            anchor=tk.W
+        ).grid(row=0, column=0, sticky=tk.W, pady=12)
+        
         self.archive_path_var = tk.StringVar()
-        path_entry = ttk.Entry(path_frame, textvariable=self.archive_path_var, width=50)
-        path_entry.grid(row=0, column=1, padx=5, pady=5)
-        ttk.Button(path_frame, text="Browse...", command=self._browse_archive_path).grid(row=0, column=2, padx=5, pady=5)
+        path_entry = self._create_entry(path_content, width=50)
+        path_entry.grid(row=0, column=1, sticky=tk.W, pady=12, padx=8)
+        path_entry.config(textvariable=self.archive_path_var)
         
-        # Options
-        options_frame = ttk.LabelFrame(frame, text="Organization Options")
-        options_frame.pack(fill=tk.X, padx=16, pady=12)
+        browse_btn = self._create_button(path_content, "Browse...", self._browse_archive_path, secondary=True)
+        browse_btn.grid(row=0, column=2, pady=12, padx=8)
+        
+        # Options card
+        options_card = self._create_card(frame, "Organization Options")
+        options_card.pack(fill=tk.X)
+        
+        options_content = tk.Frame(options_card, bg=self.colors['card'])
+        options_content.pack(fill=tk.X, padx=20, pady=(0, 16))
         
         self.create_date_folders_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="Create date folders (YYYY-MM)", 
-                       variable=self.create_date_folders_var).pack(anchor=tk.W, padx=5, pady=5)
+        date_cb = tk.Checkbutton(
+            options_content,
+            text="Create date folders (YYYY-MM)",
+            variable=self.create_date_folders_var,
+            font=self.fonts['body'],
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            selectcolor=self.colors['card'],
+            activebackground=self.colors['card'],
+            activeforeground=self.colors['text'],
+            cursor="hand2"
+        )
+        date_cb.pack(anchor=tk.W, pady=8)
         
         self.create_category_folders_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="Create category folders", 
-                       variable=self.create_category_folders_var).pack(anchor=tk.W, padx=5, pady=5)
+        cat_cb = tk.Checkbutton(
+            options_content,
+            text="Create category folders",
+            variable=self.create_category_folders_var,
+            font=self.fonts['body'],
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            selectcolor=self.colors['card'],
+            activebackground=self.colors['card'],
+            activeforeground=self.colors['text'],
+            cursor="hand2"
+        )
+        cat_cb.pack(anchor=tk.W, pady=8)
         
         self.move_files_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="Move files to archive (uncheck to only rename in place)", 
-                       variable=self.move_files_var).pack(anchor=tk.W, padx=5, pady=5)
+        move_cb = tk.Checkbutton(
+            options_content,
+            text="Move files to archive (uncheck to only rename in place)",
+            variable=self.move_files_var,
+            font=self.fonts['body'],
+            bg=self.colors['card'],
+            fg=self.colors['text'],
+            selectcolor=self.colors['card'],
+            activebackground=self.colors['card'],
+            activeforeground=self.colors['text'],
+            cursor="hand2"
+        )
+        move_cb.pack(anchor=tk.W, pady=8)
     
-    def _create_examples_tab(self):
-        """Create few-shot examples tab."""
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Few-Shot Examples")
+    def _create_examples_view(self):
+        """Create few-shot examples view."""
+        frame = tk.Frame(self.view_container, bg=self.colors['bg'])
+        self.views['examples'] = frame
         
         # Instructions
-        ttk.Label(
+        desc = tk.Label(
             frame,
-            text="Add examples to help the AI learn your organization preferences:",
-            style="Muted.TLabel"
-        ).pack(anchor=tk.W, padx=16, pady=10)
+            text="Add examples to help the AI learn your organization preferences",
+            font=self.fonts['body'],
+            bg=self.colors['bg'],
+            fg=self.colors['text_muted']
+        )
+        desc.pack(anchor=tk.W, pady=(0, 16))
         
-        # Listbox
-        list_frame = ttk.Frame(frame)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=6)
+        # List card
+        list_card = self._create_card(frame)
+        list_card.pack(fill=tk.BOTH, expand=True, pady=(0, 16))
         
-        scrollbar = ttk.Scrollbar(list_frame)
+        list_content = tk.Frame(list_card, bg=self.colors['card'])
+        list_content.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
+        
+        scrollbar = tk.Scrollbar(list_content)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        self.examples_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, height=8)
-        self.examples_listbox.configure(
-            bg="#FFFFFF",
-            fg="#111827",
-            highlightthickness=1,
-            highlightbackground="#E5E7EB",
-            selectbackground="#DCE6FF",
-            selectforeground="#111827",
+        self.examples_listbox = tk.Listbox(
+            list_content,
+            yscrollcommand=scrollbar.set,
+            font=self.fonts['body'],
+            bg=self.colors['input_bg'],
+            fg=self.colors['text'],
+            selectbackground=self.colors['selected'],
+            selectforeground=self.colors['text_bright'],
+            relief=tk.FLAT,
+            bd=0,
+            highlightthickness=0
         )
         self.examples_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.examples_listbox.yview)
         
-        # Example form
-        form_frame = ttk.LabelFrame(frame, text="Example Details")
-        form_frame.pack(fill=tk.X, padx=16, pady=12)
+        # Form card
+        form_card = self._create_card(frame, "Example Details")
+        form_card.pack(fill=tk.X)
         
-        ttk.Label(form_frame, text="Original Filename:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        self.example_file_var = tk.StringVar()
-        ttk.Entry(form_frame, textvariable=self.example_file_var, width=40).grid(row=0, column=1, padx=5, pady=5)
+        form_content = tk.Frame(form_card, bg=self.colors['card'])
+        form_content.pack(fill=tk.X, padx=20, pady=(0, 16))
         
-        ttk.Label(form_frame, text="Category:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-        self.example_category_var = tk.StringVar()
-        ttk.Entry(form_frame, textvariable=self.example_category_var, width=40).grid(row=1, column=1, padx=5, pady=5)
+        fields = [
+            ("Original Filename:", "example_file_var"),
+            ("Category:", "example_category_var"),
+            ("Suggested Name:", "example_name_var"),
+            ("Tags (comma-separated):", "example_tags_var"),
+        ]
         
-        ttk.Label(form_frame, text="Suggested Name:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
-        self.example_name_var = tk.StringVar()
-        ttk.Entry(form_frame, textvariable=self.example_name_var, width=40).grid(row=2, column=1, padx=5, pady=5)
-        
-        ttk.Label(form_frame, text="Tags (comma-separated):").grid(row=3, column=0, sticky=tk.W, padx=5, pady=5)
-        self.example_tags_var = tk.StringVar()
-        ttk.Entry(form_frame, textvariable=self.example_tags_var, width=40).grid(row=3, column=1, padx=5, pady=5)
+        for idx, (label_text, var_name) in enumerate(fields):
+            tk.Label(
+                form_content,
+                text=label_text,
+                font=self.fonts['body'],
+                bg=self.colors['card'],
+                fg=self.colors['text'],
+                width=20,
+                anchor=tk.W
+            ).grid(row=idx, column=0, sticky=tk.W, pady=12)
+            
+            var = tk.StringVar()
+            setattr(self, var_name, var)
+            entry = self._create_entry(form_content, width=40)
+            entry.grid(row=idx, column=1, sticky=tk.W, pady=12, padx=8)
+            entry.config(textvariable=var)
         
         # Buttons
-        button_frame = ttk.Frame(frame)
-        button_frame.pack(fill=tk.X, padx=16, pady=10)
+        btn_frame = tk.Frame(form_content, bg=self.colors['card'])
+        btn_frame.grid(row=len(fields), column=0, columnspan=2, pady=12, sticky=tk.W)
         
-        ttk.Button(button_frame, text="Add Example", command=self._add_example).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Remove Selected", command=self._remove_example).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Clear Form", command=self._clear_example_form).pack(side=tk.LEFT, padx=5)
+        self._create_button(btn_frame, "Add Example", self._add_example, secondary=True).pack(side=tk.LEFT, padx=4)
+        self._create_button(btn_frame, "Remove", self._remove_example, secondary=True).pack(side=tk.LEFT, padx=4)
+        self._create_button(btn_frame, "Clear", self._clear_example_form, secondary=True).pack(side=tk.LEFT, padx=4)
     
-    def _create_pending_tab(self):
-        """Create pending actions tab (HITL mode)."""
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Pending Actions")
+    def _create_pending_view(self):
+        """Create pending actions view."""
+        frame = tk.Frame(self.view_container, bg=self.colors['bg'])
+        self.views['pending'] = frame
         
         # Instructions
-        ttk.Label(
+        desc = tk.Label(
             frame,
-            text="Pending file organization actions (HITL mode):",
-            style="Muted.TLabel"
-        ).pack(anchor=tk.W, padx=16, pady=10)
+            text="Pending file organization actions (HITL mode)",
+            font=self.fonts['body'],
+            bg=self.colors['bg'],
+            fg=self.colors['text_muted']
+        )
+        desc.pack(anchor=tk.W, pady=(0, 16))
         
-        # Treeview for pending actions
-        tree_frame = ttk.Frame(frame)
-        tree_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=6)
+        # Treeview card
+        tree_card = self._create_card(frame)
+        tree_card.pack(fill=tk.BOTH, expand=True, pady=(0, 16))
+        
+        tree_content = tk.Frame(tree_card, bg=self.colors['card'])
+        tree_content.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
         
         columns = ("File", "Category", "Action", "Destination")
-        self.pending_tree = ttk.Treeview(tree_frame, columns=columns, show="tree headings", height=15, style="Modern.Treeview")
+        self.pending_tree = ttk.Treeview(
+            tree_content,
+            columns=columns,
+            show="tree headings",
+            height=15
+        )
+        
+        # Style treeview
+        style = ttk.Style()
+        style.configure("Treeview", background=self.colors['input_bg'], foreground=self.colors['text'], fieldbackground=self.colors['input_bg'])
+        style.map("Treeview", background=[("selected", self.colors['selected'])])
+        
         self.pending_tree.heading("#0", text="ID")
         self.pending_tree.heading("File", text="File")
         self.pending_tree.heading("Category", text="Category")
@@ -418,24 +894,33 @@ class WatchDockGUI:
         self.pending_tree.column("Action", width=80)
         self.pending_tree.column("Destination", width=250)
         
-        scrollbar_tree = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.pending_tree.yview)
+        scrollbar_tree = tk.Scrollbar(tree_content, orient=tk.VERTICAL, command=self.pending_tree.yview)
         self.pending_tree.configure(yscrollcommand=scrollbar_tree.set)
         
         self.pending_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar_tree.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Action buttons
-        action_frame = ttk.Frame(frame)
-        action_frame.pack(fill=tk.X, padx=16, pady=10)
+        # Action buttons card
+        action_card = self._create_card(frame)
+        action_card.pack(fill=tk.X)
         
-        ttk.Button(action_frame, text="Approve Selected", command=self._approve_selected).pack(side=tk.LEFT, padx=5)
-        ttk.Button(action_frame, text="Reject Selected", command=self._reject_selected).pack(side=tk.LEFT, padx=5)
-        ttk.Button(action_frame, text="Approve All", command=self._approve_all).pack(side=tk.LEFT, padx=5)
-        ttk.Button(action_frame, text="Refresh", command=self._refresh_pending_actions).pack(side=tk.LEFT, padx=5)
+        action_content = tk.Frame(action_card, bg=self.colors['card'])
+        action_content.pack(fill=tk.X, padx=20, pady=16)
+        
+        self._create_button(action_content, "Approve Selected", self._approve_selected, secondary=True).pack(side=tk.LEFT, padx=4)
+        self._create_button(action_content, "Reject Selected", self._reject_selected, secondary=True).pack(side=tk.LEFT, padx=4)
+        self._create_button(action_content, "Approve All", self._approve_all, secondary=True).pack(side=tk.LEFT, padx=4)
+        self._create_button(action_content, "Refresh", self._refresh_pending_actions, secondary=True).pack(side=tk.LEFT, padx=4)
         
         # Status label
-        self.pending_status_label = ttk.Label(frame, text="No pending actions", style="Muted.TLabel")
-        self.pending_status_label.pack(anchor=tk.W, padx=16, pady=6)
+        self.pending_status_label = tk.Label(
+            action_content,
+            text="No pending actions",
+            font=self.fonts['small'],
+            bg=self.colors['card'],
+            fg=self.colors['text_muted']
+        )
+        self.pending_status_label.pack(side=tk.LEFT, padx=16)
     
     def _populate_ui(self):
         """Populate UI with current configuration."""
@@ -455,7 +940,6 @@ class WatchDockGUI:
         self.base_url_var.set(self.config.ai_config.base_url or "http://localhost:11434/v1")
         self.temperature_var.set(self.config.ai_config.temperature)
         self.temp_label.config(text=f"{self.config.ai_config.temperature:.1f}")
-        # Don't set API key in UI for security (will be preserved when saving)
         self._on_provider_change()
         
         # Archive settings
@@ -474,115 +958,57 @@ class WatchDockGUI:
         # Refresh pending actions if in HITL mode
         if self.config.mode == "hitl":
             self._refresh_pending_actions()
-
+        
         self._update_overview()
-
-    def _apply_theme(self):
-        """Apply a modern, neutral theme to the UI."""
-        style = ttk.Style(self.root)
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-
-        bg = "#F7F8FB"
-        surface = "#FFFFFF"
-        text = "#111827"
-        muted = "#6B7280"
-        accent = "#4F46E5"
-        accent_hover = "#4338CA"
-        border = "#E5E7EB"
-
-        self.root.configure(background=bg)
-
-        default_font = tkfont.nametofont("TkDefaultFont")
-        default_font.configure(size=11)
-        heading_font = tkfont.Font(family=default_font.actual("family"), size=16, weight="bold")
-        subtitle_font = tkfont.Font(family=default_font.actual("family"), size=10)
-        section_font = tkfont.Font(family=default_font.actual("family"), size=11, weight="bold")
-
-        style.configure("TFrame", background=bg)
-        style.configure("Header.TFrame", background=bg)
-        style.configure("TLabel", background=bg, foreground=text)
-        style.configure("Title.TLabel", background=bg, foreground=text, font=heading_font)
-        style.configure("Subtitle.TLabel", background=bg, foreground=muted, font=subtitle_font)
-        style.configure("Section.TLabel", background=bg, foreground=text, font=section_font)
-        style.configure("Muted.TLabel", background=bg, foreground=muted)
-
-        style.configure("TLabelframe", background=bg, foreground=text)
-        style.configure("TLabelframe.Label", background=bg, foreground=muted, font=subtitle_font)
-
-        style.configure("TButton", padding=(12, 6))
-        style.configure("Primary.TButton", background=accent, foreground="#FFFFFF")
-        style.map(
-            "Primary.TButton",
-            background=[("active", accent_hover), ("pressed", accent_hover)],
-        )
-
-        style.configure("TNotebook", background=bg, borderwidth=0)
-        style.configure(
-            "TNotebook.Tab",
-            background=bg,
-            foreground=muted,
-            padding=(12, 8),
-        )
-        style.map(
-            "TNotebook.Tab",
-            background=[("selected", surface)],
-            foreground=[("selected", text)],
-        )
-
-        style.configure(
-            "Modern.Treeview",
-            background=surface,
-            fieldbackground=surface,
-            foreground=text,
-            rowheight=26,
-            bordercolor=border,
-            borderwidth=1,
-        )
-        style.map("Modern.Treeview", background=[("selected", "#DCE6FF")])
-
+        self._update_status()
+    
     def _update_overview(self):
-        """Update overview and status bar."""
+        """Update overview labels."""
         config_path = Path(DEFAULT_CONFIG_PATH)
         watched_count = len(self.config.watched_folders)
         provider = self.config.ai_config.provider
         model = self.config.ai_config.model
         mode = self.config.mode
-
+        
         if hasattr(self, "overview_labels"):
             self.overview_labels["config_path"].config(text=str(config_path))
             self.overview_labels["watched_count"].config(text=str(watched_count))
             self.overview_labels["mode"].config(text=mode)
             self.overview_labels["provider"].config(text=provider)
             self.overview_labels["model"].config(text=model)
-
+    
+    def _update_status(self):
+        """Update status bar."""
+        config_path = Path(DEFAULT_CONFIG_PATH)
+        mode = self.config.mode
+        provider = self.config.ai_config.provider
+        model = self.config.ai_config.model
+        
         if hasattr(self, "status_label"):
             self.status_label.config(
                 text=f"Config: {config_path}  |  Mode: {mode}  |  Provider: {provider}  |  Model: {model}  |  v{__version__}"
             )
-
+    
     def _open_path(self, path: Path):
         """Open a file or folder in the OS file manager."""
         try:
             if platform.system() == "Windows":
-                os.startfile(str(path))  # type: ignore[attr-defined]
+                os.startfile(str(path))
             elif platform.system() == "Darwin":
                 subprocess.run(["open", str(path)], check=False)
             else:
                 subprocess.run(["xdg-open", str(path)], check=False)
         except Exception as e:
             messagebox.showerror("Error", f"Could not open: {path}\n{e}")
-
+    
     def _open_config_folder(self):
         """Open the config folder."""
         self._open_path(Path(DEFAULT_CONFIG_PATH).parent)
-
+    
     def _open_config_file(self):
         """Open the config file."""
         self._open_path(Path(DEFAULT_CONFIG_PATH))
-
+    
     def _open_log_file(self):
         """Open the log file if it exists."""
         log_path = Path.cwd() / "watchdock.log"
@@ -595,11 +1021,11 @@ class WatchDockGUI:
         """Handle provider change."""
         provider = self.ai_provider_var.get()
         if provider == "ollama":
-            self.api_key_frame.pack_forget()
-            self.base_url_frame.pack(fill=tk.X, padx=10, pady=10)
+            self.api_key_card.pack_forget()
+            self.base_url_card.pack(fill=tk.X, pady=(0, 16))
         else:
-            self.base_url_frame.pack_forget()
-            self.api_key_frame.pack(fill=tk.X, padx=10, pady=10)
+            self.base_url_card.pack_forget()
+            self.api_key_card.pack(fill=tk.X, pady=(0, 16))
     
     def _add_folder(self):
         """Add a folder to watch."""
@@ -616,7 +1042,6 @@ class WatchDockGUI:
         """Browse for folder."""
         folder = filedialog.askdirectory(title="Select folder to watch")
         if folder:
-            # Update selected item or add new
             selection = self.folders_listbox.curselection()
             if selection:
                 idx = selection[0]
@@ -759,6 +1184,9 @@ class WatchDockGUI:
             if self.config.mode == "hitl":
                 self.pending_queue = PendingActionsQueue()
                 self._refresh_pending_actions()
+            
+            self._update_overview()
+            self._update_status()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save configuration: {e}")
             logger.error(f"Error saving config: {e}", exc_info=True)
@@ -788,9 +1216,9 @@ class WatchDockGUI:
             # Update status
             count = len(pending)
             if count > 0:
-                self.pending_status_label.config(text=f"{count} pending action(s)", foreground="blue")
+                self.pending_status_label.config(text=f"{count} pending action(s)", fg=self.colors['accent'])
             else:
-                self.pending_status_label.config(text="No pending actions", foreground="gray")
+                self.pending_status_label.config(text="No pending actions", fg=self.colors['text_muted'])
         except Exception as e:
             logger.error(f"Error refreshing pending actions: {e}")
     
@@ -798,7 +1226,7 @@ class WatchDockGUI:
         """Auto-refresh pending actions (called periodically)."""
         if self.config.mode == "hitl":
             self._refresh_pending_actions()
-            self.root.after(5000, self._auto_refresh_pending)  # Schedule next refresh
+            self.root.after(5000, self._auto_refresh_pending)
     
     def _approve_selected(self):
         """Approve selected pending action(s)."""
@@ -812,7 +1240,6 @@ class WatchDockGUI:
             action_id = self.pending_tree.item(item_id, "text")
             action = self.pending_queue.approve(action_id)
             if action:
-                # Execute the action
                 try:
                     from watchdock.file_organizer import FileOrganizer
                     organizer = FileOrganizer(self.config.archive_config)
@@ -880,4 +1307,3 @@ def run_gui():
 
 if __name__ == '__main__':
     run_gui()
-
