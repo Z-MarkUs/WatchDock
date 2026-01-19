@@ -5,6 +5,24 @@ All notable changes to WatchDock will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-01-16
+
+### Added
+- CLI subcommands: `watchdock update`, `watchdock version`, `watchdock status`, `watchdock config`
+- `wd` alias as shorter alternative to `watchdock` command
+- `watchdock update --install` command to automatically update from PyPI
+- `watchdock config init` and `watchdock config validate` commands
+
+### Changed
+- Complete GUI redesign with OpenAI-style dark theme
+- Improved text contrast and readability (fixed grey-on-white issues)
+- Enhanced color palette with darker backgrounds and higher contrast
+- Changed accent color to OpenAI green (#10A37F)
+- Improved card styling with borders and dividers
+- Better input field focus states and styling
+- Enhanced navigation buttons with improved hover effects
+- Replaced ttk buttons with custom styled buttons for consistency
+
 ## [0.1.2] - 2026-01-16
 
 ### Changed
