@@ -46,7 +46,7 @@ pip install -e .
 2. **Launch the GUI:**
 
 ```bash
-watchdock --gui
+watchdock gui
 ```
 
 3. **Configure WatchDock** through the GUI:
@@ -58,8 +58,8 @@ watchdock --gui
 4. **Run WatchDock** (from command line):
 
 ```bash
-watchdock
-# Or: python main.py
+watchdock start
+# Or simply: watchdock
 ```
 
 ### Option 2: Command Line (For Developers)
@@ -73,8 +73,7 @@ pip install -e .
 2. **Initialize configuration:**
 
 ```bash
-watchdock --init-config
-# Or: python main.py --init-config
+watchdock config init
 ```
 
 This creates a default configuration file at `~/.watchdock/config.json`
@@ -84,11 +83,83 @@ This creates a default configuration file at `~/.watchdock/config.json`
    - Configure watched folders
    - Set archive preferences
 
-4. **Run WatchDock:**
+4. **Check status:**
 
 ```bash
+watchdock status
+```
+
+5. **Run WatchDock:**
+
+```bash
+watchdock start
+# Or simply: watchdock
+```
+
+## CLI Commands
+
+WatchDock provides a comprehensive CLI with subcommands:
+
+### Basic Commands
+
+```bash
+# Show version
+watchdock version
+
+# Check for updates
+watchdock update
+
+# Install update if available
+watchdock update --install
+
+# Show current status
+watchdock status
+
+# Launch GUI
+watchdock gui
+```
+
+### Configuration Commands
+
+```bash
+# Initialize default configuration
+watchdock config init
+
+# Validate configuration file
+watchdock config validate
+```
+
+### HITL Mode Commands
+
+```bash
+# List pending actions
+watchdock list-pending
+
+# Approve an action
+watchdock approve <action_id>
+
+# Reject an action
+watchdock reject <action_id>
+```
+
+### Starting WatchDock
+
+```bash
+# Start monitoring (default command)
+watchdock start
+
+# Or simply (start is the default)
 watchdock
-# Or: python main.py
+```
+
+### Getting Help
+
+```bash
+# Show all commands
+watchdock --help
+
+# Show help for a specific command
+watchdock <command> --help
 ```
 
 ### Creating Standalone Executables
@@ -130,13 +201,13 @@ Files are analyzed and proposed actions are queued for your approval. You can:
 **CLI Commands for HITL Mode:**
 ```bash
 # List all pending actions
-watchdock --list-pending
+watchdock list-pending
 
 # Approve a specific action
-watchdock --approve <action_id>
+watchdock approve <action_id>
 
 # Reject a specific action
-watchdock --reject <action_id>
+watchdock reject <action_id>
 ```
 
 **GUI:** Use the "Pending Actions" tab to review and manage pending actions.
