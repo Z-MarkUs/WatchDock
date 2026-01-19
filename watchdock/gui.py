@@ -93,12 +93,13 @@ class WatchDockGUI:
     
     def _configure_global_styles(self):
         """Configure global widget styles to prevent white/grey highlights on click."""
-        # Configure root window focus highlight (already done in __init__, but ensure it's set)
-        # Also bind to prevent focus traversal from showing highlights
+        # Disable focus traversal completely to prevent focus highlights
+        self.root.bind_all("<Button-1>", lambda e: self.root.focus_set())
         self.root.bind_class("Frame", "<FocusIn>", lambda e: None)
         self.root.bind_class("Label", "<FocusIn>", lambda e: None)
+        self.root.bind_class("Button", "<FocusIn>", lambda e: None)
         
-        # Set option database for default widget colors
+        # Set option database for default widget colors (must be before widget creation)
         self.root.option_add("*background", self.colors['bg'])
         self.root.option_add("*foreground", self.colors['text_bright'])
         self.root.option_add("*selectBackground", self.colors['selected'])
@@ -108,6 +109,7 @@ class WatchDockGUI:
         self.root.option_add("*insertBackground", self.colors['text_bright'])
         self.root.option_add("*activeBackground", self.colors['hover'])
         self.root.option_add("*activeForeground", self.colors['text_bright'])
+        self.root.option_add("*highlightThickness", 0)  # Remove all highlight borders
         
         # Configure ttk styles for dark theme
         style = ttk.Style(self.root)
@@ -330,6 +332,10 @@ class WatchDockGUI:
                 padx=20,
                 pady=12,
                 cursor="hand2",
+                highlightthickness=0,
+                highlightbackground=self.colors['bg'],
+                highlightcolor=self.colors['bg'],
+                borderwidth=0,
                 command=lambda v=view_id: self._show_view(v)
             )
             btn.pack(fill=tk.X)
@@ -444,7 +450,11 @@ class WatchDockGUI:
             relief=tk.FLAT,
             padx=20,
             pady=10,
-            cursor="hand2"
+            cursor="hand2",
+            highlightthickness=0,
+            highlightbackground=self.colors['bg'],
+            highlightcolor=self.colors['bg'],
+            borderwidth=0
         )
         return btn
     

@@ -132,50 +132,69 @@ class WatchDock:
         logger.info("WatchDock stopped")
 
 
+def _check_pypi_version():
+    """Check PyPI for latest version. Returns (latest_version, error_message)."""
+    try:
+        url = "https://pypi.org/pypi/watchdock/json"
+        with urllib.request.urlopen(url, timeout=5) as response:
+            data = json.loads(response.read())
+            return data['info']['version'], None
+    except Exception as e:
+        return None, str(e)
+
+
 def cmd_version(args):
-    """Show version information."""
-    print(f"WatchDock version {__version__}")
+    """Show version information and check for updates."""
+    current_version = __version__
+    print(f"WatchDock version {current_version}")
+    
+    # Check for updates
+    latest_version, error = _check_pypi_version()
+    if error:
+        print(f"⚠️  Could not check for updates: {error}")
+        return 0
+    
+    if latest_version:
+        if packaging_version.parse(latest_version) > packaging_version.parse(current_version):
+            print(f"⚠️  Update available: {latest_version}")
+            print(f"   Run 'watchdock update' to install the latest version.")
+        else:
+            print(f"✅ You are running the latest version ({current_version})")
+    
     return 0
 
 
 def cmd_update(args):
-    """Check for and install updates."""
+    """Install updates from PyPI."""
+    current_version = __version__
     print("Checking for updates...")
     
-    try:
-        # Check PyPI for latest version
-        url = "https://pypi.org/pypi/watchdock/json"
-        with urllib.request.urlopen(url, timeout=5) as response:
-            data = json.loads(response.read())
-            latest_version = data['info']['version']
-        
-        current_version = __version__
-        
-        if packaging_version.parse(latest_version) > packaging_version.parse(current_version):
-            print(f"Update available: {current_version} → {latest_version}")
-            if args.install:
-                print("Installing update...")
-                result = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "--upgrade", "watchdock"],
-                    check=False
-                )
-                if result.returncode == 0:
-                    print("✅ Update installed successfully!")
-                    print("Please restart WatchDock to use the new version.")
-                    return 0
-                else:
-                    print("❌ Update failed. Try running: pip install -U watchdock")
-                    return 1
-            else:
-                print("Run 'watchdock update --install' to install the update.")
-                return 0
-        else:
-            print(f"✅ You are running the latest version ({current_version})")
-            return 0
-    except Exception as e:
-        print(f"❌ Error checking for updates: {e}")
+    latest_version, error = _check_pypi_version()
+    if error:
+        print(f"❌ Error checking for updates: {error}")
         print("You can manually update with: pip install -U watchdock")
         return 1
+    
+    if not latest_version:
+        print("❌ Could not determine latest version")
+        return 1
+    
+    if packaging_version.parse(latest_version) > packaging_version.parse(current_version):
+        print(f"Update available: {current_version} → {latest_version}")
+        print("Installing update...")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "watchdock"],
+            check=False
+        )
+        if result.returncode == 0:
+            print("✅ Update installed successfully!")
+            return 0
+        else:
+            print("❌ Update failed. Try running: pip install -U watchdock")
+            return 1
+    else:
+        print(f"✅ You are already running the latest version ({current_version})")
+        return 0
 
 
 def cmd_status(args):
@@ -345,8 +364,7 @@ def main():
     version_parser.set_defaults(func=cmd_version)
     
     # Update command
-    update_parser = subparsers.add_parser('update', help='Check for and install updates')
-    update_parser.add_argument('--install', action='store_true', help='Install update if available')
+    update_parser = subparsers.add_parser('update', help='Install updates from PyPI')
     update_parser.set_defaults(func=cmd_update)
     
     # Status command
