@@ -39,6 +39,7 @@ setup(
     entry_points={
         "console_scripts": [
             "watchdock=watchdock.main:main",
+            "wd=watchdock.main:main",
         ],
     },
     classifiers=[

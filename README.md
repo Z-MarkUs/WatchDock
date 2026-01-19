@@ -47,6 +47,7 @@ pip install -e .
 
 ```bash
 watchdock gui
+# Or use the shorter alias: wd gui
 ```
 
 3. **Configure WatchDock** through the GUI:
@@ -60,6 +61,7 @@ watchdock gui
 ```bash
 watchdock start
 # Or simply: watchdock
+# Or use the shorter alias: wd start (or just wd)
 ```
 
 ### Option 2: Command Line (For Developers)
@@ -74,6 +76,7 @@ pip install -e .
 
 ```bash
 watchdock config init
+# Or: wd config init
 ```
 
 This creates a default configuration file at `~/.watchdock/config.json`
@@ -98,7 +101,16 @@ watchdock start
 
 ## CLI Commands
 
-WatchDock provides a comprehensive CLI with subcommands:
+WatchDock provides a comprehensive CLI with subcommands. You can use either `watchdock` or the shorter alias `wd`:
+
+```bash
+# Both work identically
+watchdock version
+wd version
+
+watchdock update
+wd update
+```
 
 ### Basic Commands
 
