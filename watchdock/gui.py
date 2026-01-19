@@ -34,23 +34,26 @@ class WatchDockGUI:
         self.root.resizable(True, True)
         self.root.minsize(1000, 700)
 
-        # Dark theme colors (ChatGPT/Cursor style)
+        # OpenAI-style dark theme colors (high contrast, refined)
         self.colors = {
-            'bg': '#1E1E1E',           # Main background (dark gray)
-            'sidebar': '#252526',       # Sidebar background
-            'card': '#2D2D30',          # Card background
-            'card_border': '#3E3E42',   # Card border
-            'text': '#CCCCCC',          # Primary text
-            'text_muted': '#858585',     # Muted text
-            'text_bright': '#FFFFFF',   # Bright text
-            'accent': '#007ACC',        # Accent blue
-            'accent_hover': '#0098FF',  # Accent hover
-            'hover': '#2A2D2E',         # Hover background
-            'selected': '#094771',      # Selected item
-            'input_bg': '#3C3C3C',      # Input background
-            'input_border': '#454545',  # Input border
-            'success': '#4EC9B0',       # Success green
-            'warning': '#CE9178',       # Warning orange
+            'bg': '#0D0D0D',           # Main background (almost black)
+            'sidebar': '#171717',       # Sidebar background (slightly lighter)
+            'card': '#1A1A1A',          # Card background
+            'card_border': '#2A2A2A',   # Card border (subtle)
+            'text': '#ECECEC',          # Primary text (high contrast white)
+            'text_muted': '#A0A0A0',     # Muted text (lighter grey, still readable)
+            'text_bright': '#FFFFFF',   # Bright text (pure white)
+            'accent': '#10A37F',        # Accent green (OpenAI style)
+            'accent_hover': '#0D8C6F',  # Accent hover
+            'hover': '#252525',         # Hover background
+            'selected': '#1A3A2E',      # Selected item (green tint)
+            'input_bg': '#252525',      # Input background
+            'input_border': '#3A3A3A',  # Input border
+            'input_focus': '#10A37F',   # Input focus border
+            'success': '#10A37F',       # Success green
+            'warning': '#F59E0B',       # Warning amber
+            'error': '#EF4444',         # Error red
+            'divider': '#2A2A2A',       # Divider lines
         }
         
         self.root.configure(bg=self.colors['bg'])
@@ -181,21 +184,41 @@ class WatchDockGUI:
         
         self.nav_buttons = {}
         for view_id, label, icon in nav_items:
+            # Button container for better hover effect
+            btn_frame = tk.Frame(sidebar, bg=self.colors['sidebar'])
+            btn_frame.pack(fill=tk.X, padx=8, pady=2)
+            
             btn = tk.Button(
-                sidebar,
+                btn_frame,
                 text=f"  {icon}  {label}",
                 font=self.fonts['nav'],
                 bg=self.colors['sidebar'],
-                fg=self.colors['text'],
+                fg=self.colors['text_bright'],  # High contrast white
                 activebackground=self.colors['hover'],
                 activeforeground=self.colors['text_bright'],
                 relief=tk.FLAT,
                 anchor=tk.W,
                 padx=20,
                 pady=12,
+                cursor="hand2",
                 command=lambda v=view_id: self._show_view(v)
             )
-            btn.pack(fill=tk.X, padx=8, pady=2)
+            btn.pack(fill=tk.X)
+            
+            # Hover effect
+            def on_enter(e, b=btn, f=btn_frame):
+                if self.current_view != view_id:
+                    b.configure(bg=self.colors['hover'])
+                    f.configure(bg=self.colors['hover'])
+            
+            def on_leave(e, b=btn, f=btn_frame):
+                if self.current_view != view_id:
+                    b.configure(bg=self.colors['sidebar'])
+                    f.configure(bg=self.colors['sidebar'])
+            
+            btn.bind("<Enter>", on_enter)
+            btn.bind("<Leave>", on_leave)
+            
             self.nav_buttons[view_id] = btn
         
         # Version at bottom
@@ -236,7 +259,7 @@ class WatchDockGUI:
             text="",
             font=self.fonts['small'],
             bg=self.colors['bg'],
-            fg=self.colors['text_muted']
+            fg=self.colors['text']  # Better contrast than text_muted
         )
         self.status_label.pack(side=tk.LEFT, pady=16)
         
@@ -251,8 +274,12 @@ class WatchDockGUI:
         save_btn.pack(side=tk.LEFT, padx=8)
     
     def _create_card(self, parent, title=None):
-        """Create a modern card container."""
-        card = tk.Frame(parent, bg=self.colors['card'], relief=tk.FLAT, bd=1)
+        """Create a modern card container with OpenAI-style design."""
+        # Outer frame for border effect
+        card_outer = tk.Frame(parent, bg=self.colors['card_border'], padx=1, pady=1)
+        card = tk.Frame(card_outer, bg=self.colors['card'], relief=tk.FLAT)
+        card.pack(fill=tk.BOTH, expand=True)
+        
         if title:
             title_label = tk.Label(
                 card,
@@ -262,8 +289,13 @@ class WatchDockGUI:
                 fg=self.colors['text_bright'],
                 anchor=tk.W
             )
-            title_label.pack(fill=tk.X, padx=20, pady=(16, 8))
-        return card
+            title_label.pack(fill=tk.X, padx=20, pady=(20, 12))
+            
+            # Divider line under title
+            divider = tk.Frame(card, bg=self.colors['divider'], height=1)
+            divider.pack(fill=tk.X, padx=20)
+        
+        return card_outer
     
     def _create_button(self, parent, text, command, secondary=False):
         """Create a modern button."""
@@ -288,19 +320,21 @@ class WatchDockGUI:
         return btn
     
     def _create_entry(self, parent, width=50):
-        """Create a modern entry field."""
+        """Create a modern entry field with OpenAI-style design."""
         entry = tk.Entry(
             parent,
             font=self.fonts['body'],
             bg=self.colors['input_bg'],
-            fg=self.colors['text'],
-            insertbackground=self.colors['text'],
+            fg=self.colors['text_bright'],  # High contrast white text
+            insertbackground=self.colors['text_bright'],
             relief=tk.FLAT,
-            bd=1,
-            highlightthickness=1,
+            bd=0,
+            highlightthickness=2,
             highlightbackground=self.colors['input_border'],
-            highlightcolor=self.colors['accent'],
-            width=width
+            highlightcolor=self.colors['input_focus'],
+            width=width,
+            selectbackground=self.colors['accent'],
+            selectforeground=self.colors['text_bright']
         )
         return entry
     
@@ -317,10 +351,13 @@ class WatchDockGUI:
         
         # Update navigation highlighting
         for nav_id, btn in self.nav_buttons.items():
+            btn_frame = btn.master  # Get the frame container
             if nav_id == view_id:
                 btn.configure(bg=self.colors['selected'], fg=self.colors['text_bright'])
+                btn_frame.configure(bg=self.colors['selected'])
             else:
-                btn.configure(bg=self.colors['sidebar'], fg=self.colors['text'])
+                btn.configure(bg=self.colors['sidebar'], fg=self.colors['text_bright'])  # High contrast
+                btn_frame.configure(bg=self.colors['sidebar'])
         
         # Update header title
         titles = {
@@ -378,7 +415,7 @@ class WatchDockGUI:
                 text="-",
                 font=self.fonts['body'],
                 bg=self.colors['card'],
-                fg=self.colors['text'],
+                fg=self.colors['text_bright'],  # High contrast white for values
                 anchor=tk.W
             )
             value_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -389,25 +426,29 @@ class WatchDockGUI:
         actions_card.pack(fill=tk.X)
         
         actions_content = tk.Frame(actions_card, bg=self.colors['card'])
-        actions_content.pack(fill=tk.X, padx=20, pady=(0, 16))
+        actions_content.pack(fill=tk.X, padx=20, pady=(0, 20))
         
-        ttk.Button(
+        # Use custom styled buttons instead of ttk
+        self._create_button(
             actions_content,
-            text="Open Config Folder",
-            command=self._open_config_folder
-        ).pack(side=tk.LEFT, padx=8, pady=12)
+            "Open Config Folder",
+            self._open_config_folder,
+            secondary=True
+        ).pack(side=tk.LEFT, padx=8)
         
-        ttk.Button(
+        self._create_button(
             actions_content,
-            text="Open Config File",
-            command=self._open_config_file
-        ).pack(side=tk.LEFT, padx=8, pady=12)
+            "Open Config File",
+            self._open_config_file,
+            secondary=True
+        ).pack(side=tk.LEFT, padx=8)
         
-        ttk.Button(
+        self._create_button(
             actions_content,
-            text="Open Log File",
-            command=self._open_log_file
-        ).pack(side=tk.LEFT, padx=8, pady=12)
+            "Open Log File",
+            self._open_log_file,
+            secondary=True
+        ).pack(side=tk.LEFT, padx=8)
     
     def _create_general_view(self):
         """Create general settings view."""
