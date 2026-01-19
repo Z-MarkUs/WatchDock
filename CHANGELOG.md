@@ -5,6 +5,14 @@ All notable changes to WatchDock will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-01-16
+
+### Fixed
+- Fixed white/grey highlights appearing when clicking on widgets
+- Configured global widget styles to prevent default focus highlights
+- Set option database defaults for consistent dark theme across all widgets
+- Added highlight settings to all frames to prevent unwanted focus borders
+
 ## [0.1.3] - 2026-01-16
 
 ### Added
