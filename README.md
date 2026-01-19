@@ -46,9 +46,7 @@ pip install -e .
 2. **Launch the GUI:**
 
 ```bash
-watchdock-gui
-# Or: python -m watchdock.gui_main
-# Or: watchdock --gui
+watchdock --gui
 ```
 
 3. **Configure WatchDock** through the GUI:

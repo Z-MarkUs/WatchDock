@@ -48,7 +48,6 @@ Issues = "https://github.com/Z-MarkUs/watchdock/issues"
 
 [project.scripts]
 watchdock = "watchdock.main:main"
-watchdock-gui = "watchdock.gui_main:main"
 
 [tool.setuptools]
 packages = ["watchdock"]
