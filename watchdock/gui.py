@@ -56,7 +56,10 @@ class WatchDockGUI:
             'divider': '#2A2A2A',       # Divider lines
         }
         
-        self.root.configure(bg=self.colors['bg'])
+        self.root.configure(bg=self.colors['bg'], highlightbackground=self.colors['bg'], highlightcolor=self.colors['bg'])
+        
+        # Configure global widget styles to prevent white/grey highlights
+        self._configure_global_styles()
         
         # Setup fonts (cross-platform compatible)
         default_font = tkfont.nametofont("TkDefaultFont")
@@ -88,6 +91,114 @@ class WatchDockGUI:
             self._refresh_pending_actions()
             self.root.after(5000, self._auto_refresh_pending)
     
+    def _configure_global_styles(self):
+        """Configure global widget styles to prevent white/grey highlights on click."""
+        # Configure root window focus highlight (already done in __init__, but ensure it's set)
+        # Also bind to prevent focus traversal from showing highlights
+        self.root.bind_class("Frame", "<FocusIn>", lambda e: None)
+        self.root.bind_class("Label", "<FocusIn>", lambda e: None)
+        
+        # Set option database for default widget colors
+        self.root.option_add("*background", self.colors['bg'])
+        self.root.option_add("*foreground", self.colors['text_bright'])
+        self.root.option_add("*selectBackground", self.colors['selected'])
+        self.root.option_add("*selectForeground", self.colors['text_bright'])
+        self.root.option_add("*highlightBackground", self.colors['bg'])
+        self.root.option_add("*highlightColor", self.colors['bg'])
+        self.root.option_add("*insertBackground", self.colors['text_bright'])
+        self.root.option_add("*activeBackground", self.colors['hover'])
+        self.root.option_add("*activeForeground", self.colors['text_bright'])
+        
+        # Configure ttk styles for dark theme
+        style = ttk.Style(self.root)
+        style.theme_use("clam")  # Use clam theme for better customization
+        
+        # Configure general ttk styles
+        style.configure("TFrame", background=self.colors['bg'])
+        style.configure("TLabel", background=self.colors['bg'], foreground=self.colors['text_bright'])
+        style.configure("TButton", 
+                       background=self.colors['card'],
+                       foreground=self.colors['text_bright'],
+                       borderwidth=0,
+                       focuscolor='none')  # Remove focus highlight
+        style.map("TButton",
+                 background=[('active', self.colors['hover']),
+                            ('pressed', self.colors['hover'])],
+                 foreground=[('active', self.colors['text_bright']),
+                           ('pressed', self.colors['text_bright'])])
+        
+        # Configure Entry/Input styles
+        style.configure("TEntry",
+                       fieldbackground=self.colors['input_bg'],
+                       foreground=self.colors['text_bright'],
+                       borderwidth=1,
+                       relief=tk.FLAT,
+                       insertcolor=self.colors['text_bright'],
+                       selectbackground=self.colors['accent'],
+                       selectforeground=self.colors['text_bright'])
+        style.map("TEntry",
+                 focuscolor=[('focus', self.colors['input_focus'])],
+                 bordercolor=[('focus', self.colors['input_focus'])])
+        
+        # Configure Listbox styles
+        style.configure("TListbox",
+                       background=self.colors['card'],
+                       foreground=self.colors['text_bright'],
+                       selectbackground=self.colors['selected'],
+                       selectforeground=self.colors['text_bright'],
+                       borderwidth=0,
+                       relief=tk.FLAT)
+        
+        # Configure Treeview styles
+        style.configure("Treeview",
+                       background=self.colors['card'],
+                       foreground=self.colors['text_bright'],
+                       fieldbackground=self.colors['card'],
+                       borderwidth=0)
+        style.configure("Treeview.Heading",
+                       background=self.colors['card'],
+                       foreground=self.colors['text_bright'],
+                       borderwidth=0)
+        style.map("Treeview",
+                 background=[('selected', self.colors['selected'])],
+                 foreground=[('selected', self.colors['text_bright'])])
+        
+        # Configure Radiobutton styles
+        style.configure("TRadiobutton",
+                       background=self.colors['card'],
+                       foreground=self.colors['text_bright'],
+                       selectcolor=self.colors['card'],
+                       focuscolor='none')
+        style.map("TRadiobutton",
+                 background=[('active', self.colors['card']),
+                            ('selected', self.colors['card'])],
+                 foreground=[('active', self.colors['text_bright']),
+                            ('selected', self.colors['text_bright'])])
+        
+        # Configure Checkbutton styles
+        style.configure("TCheckbutton",
+                       background=self.colors['card'],
+                       foreground=self.colors['text_bright'],
+                       selectcolor=self.colors['card'],
+                       focuscolor='none')
+        style.map("TCheckbutton",
+                 background=[('active', self.colors['card']),
+                            ('selected', self.colors['card'])],
+                 foreground=[('active', self.colors['text_bright']),
+                            ('selected', self.colors['text_bright'])])
+        
+        # Configure Scrollbar styles
+        style.configure("TScrollbar",
+                       background=self.colors['card'],
+                       troughcolor=self.colors['bg'],
+                       borderwidth=0,
+                       arrowcolor=self.colors['text'],
+                       darkcolor=self.colors['card'],
+                       lightcolor=self.colors['card'])
+        style.map("TScrollbar",
+                 background=[('active', self.colors['hover'])],
+                 arrowcolor=[('active', self.colors['text_bright'])])
+    
     def _load_config(self) -> WatchDockConfig:
         """Load configuration from file."""
         try:
@@ -110,21 +221,39 @@ class WatchDockGUI:
     def _create_ui(self):
         """Create the UI with sidebar navigation."""
         # Main container
-        main_container = tk.Frame(self.root, bg=self.colors['bg'])
+        main_container = tk.Frame(
+            self.root, 
+            bg=self.colors['bg'],
+            highlightbackground=self.colors['bg'],
+            highlightcolor=self.colors['bg'],
+            highlightthickness=0
+        )
         main_container.pack(fill=tk.BOTH, expand=True)
         
         # Sidebar
         self._create_sidebar(main_container)
         
         # Content area
-        self.content_frame = tk.Frame(main_container, bg=self.colors['bg'])
+        self.content_frame = tk.Frame(
+            main_container, 
+            bg=self.colors['bg'],
+            highlightbackground=self.colors['bg'],
+            highlightcolor=self.colors['bg'],
+            highlightthickness=0
+        )
         self.content_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
         # Header in content area
         self._create_header()
         
         # View container (scrollable)
-        self.view_container = tk.Frame(self.content_frame, bg=self.colors['bg'])
+        self.view_container = tk.Frame(
+            self.content_frame, 
+            bg=self.colors['bg'],
+            highlightbackground=self.colors['bg'],
+            highlightcolor=self.colors['bg'],
+            highlightthickness=0
+        )
         self.view_container.pack(fill=tk.BOTH, expand=True, padx=24, pady=16)
         
         # Create all views (hidden initially)
