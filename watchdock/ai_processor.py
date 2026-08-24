@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from watchdock.config import AIConfig
+from watchdock.paths import default_examples_path
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_EXAMPLES_PATH = Path.home() / ".watchdock" / "few_shot_examples.json"
 _CLIENT_NOT_SUPPLIED = object()
 
 _ANALYSIS_SCHEMA = {
@@ -47,7 +47,7 @@ class AIProcessor:
     ) -> None:
         self.config = config
         self.provider = config.provider
-        self.examples_path = examples_path or DEFAULT_EXAMPLES_PATH
+        self.examples_path = examples_path or default_examples_path()
         self._few_shot_examples = self._load_few_shot_examples()
         self.unavailable_reason: Optional[str] = None
         if client is _CLIENT_NOT_SUPPLIED:

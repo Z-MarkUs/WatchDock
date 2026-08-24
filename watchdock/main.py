@@ -1,417 +1,673 @@
-"""
-Main application entry point for WatchDock.
-"""
+"""WatchDock application service and command-line interface."""
 
-import sys
-import os
-import signal
-import logging
+from __future__ import annotations
+
 import argparse
-import subprocess
+import importlib.util
 import json
+import logging
+import os
+import platform
+import shutil
+import signal
+import subprocess
+import sys
+import time
 import urllib.request
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
 from packaging import version as packaging_version
+
 from watchdock import __version__
-from watchdock.config import WatchDockConfig
-from watchdock.watcher import FileWatcher
 from watchdock.ai_processor import AIProcessor
+from watchdock.config import WatchDockConfig
 from watchdock.file_organizer import FileOrganizer
-from watchdock.pending_actions import PendingActionsQueue
-
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('watchdock.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+from watchdock.logging_utils import configure_logging, prepare_console
+from watchdock.paths import default_config_path
+from watchdock.pending_actions import PendingAction, PendingActionsQueue
+from watchdock.watcher import FileWatcher
 
 logger = logging.getLogger(__name__)
 
 
 class WatchDock:
-    """Main WatchDock application."""
-    
-    def __init__(self, config: WatchDockConfig):
+    """Coordinate analysis, review, organization, and folder monitoring."""
+
+    def __init__(
+        self,
+        config: WatchDockConfig,
+        *,
+        state_dir: Optional[Path] = None,
+        ai_processor: Optional[AIProcessor] = None,
+        file_organizer: Optional[FileOrganizer] = None,
+        pending_queue: Optional[PendingActionsQueue] = None,
+    ) -> None:
+        config.validate()
         self.config = config
-        self.ai_processor = AIProcessor(config.ai_config)
-        self.file_organizer = FileOrganizer(config.archive_config)
-        self.pending_queue = PendingActionsQueue() if config.mode == "hitl" else None
-        self.watcher = None
+        self.state_dir = (state_dir or default_config_path().parent).expanduser()
+        self.ai_processor = ai_processor or AIProcessor(
+            config.ai_config,
+            examples_path=self.state_dir / "few_shot_examples.json",
+        )
+        self.file_organizer = file_organizer or FileOrganizer(config.archive_config)
+        self.pending_queue = pending_queue or PendingActionsQueue(
+            db_path=self.state_dir / "pending_actions.sqlite3"
+        )
+        self.watcher: Optional[FileWatcher] = None
         self.running = False
-    
-    def process_file(self, file_path: str):
-        """Process a single file."""
+
+    def process_file(self, file_path: str) -> None:
+        """Analyze one file and either queue or safely execute its action."""
+
+        if self.file_organizer.is_managed_path(file_path):
+            logger.debug("Ignoring file already managed by archive: %s", file_path)
+            return
+
+        logger.info("Analyzing file: %s", file_path)
+        analysis = self.ai_processor.analyze_file(file_path)
+        proposal = self.file_organizer.get_proposed_action(file_path, analysis)
+        needs_review = self.config.mode == "hitl" or bool(
+            analysis.get("requires_review", False)
+        )
+
+        if needs_review:
+            action = self.pending_queue.add(file_path, analysis, proposal)
+            if self.config.mode == "auto":
+                logger.warning(
+                    "Provider result requires review; source was not moved: %s",
+                    file_path,
+                )
+            self._notify_pending_action(action)
+            return
+
+        result = self.file_organizer.organize_file(file_path, analysis)
+        if result.get("error"):
+            raise RuntimeError(str(result["error"]))
+        logger.info("Organization result: %s", result)
+
+    @staticmethod
+    def _notify_pending_action(action: PendingAction) -> None:
+        """Send a best-effort desktop notification without invoking a shell."""
+
+        filename = Path(action.file_path).name
         try:
-            logger.info(f"Analyzing file: {file_path}")
-            
-            # Analyze file with AI
-            analysis = self.ai_processor.analyze_file(file_path)
-            logger.info(f"Analysis result: {analysis}")
-            
-            # Check mode
-            if self.config.mode == "hitl":
-                # HITL mode: add to pending queue
-                proposed_action = self.file_organizer.get_proposed_action(file_path, analysis)
-                action = self.pending_queue.add(file_path, analysis, proposed_action)
-                logger.info(f"Added to pending queue (action_id: {action.action_id}). "
-                          f"Use GUI or CLI to approve/reject.")
-                
-                # Try to show notification
-                self._notify_pending_action(action)
-            else:
-                # Auto mode: organize immediately
-                result = self.file_organizer.organize_file(file_path, analysis)
-                logger.info(f"Organization result: {result}")
-            
-        except Exception as e:
-            logger.error(f"Error processing file {file_path}: {e}", exc_info=True)
-    
-    def _notify_pending_action(self, action):
-        """Notify user about pending action (CLI mode)."""
-        try:
-            # Try desktop notifications
-            try:
-                import platform
-                if platform.system() == "Darwin":  # macOS
-                    os.system(f'''osascript -e 'display notification "{action.file_path}" with title "WatchDock: Pending Action"' ''')
-                elif platform.system() == "Linux":
-                    os.system(f'notify-send "WatchDock" "Pending action for: {Path(action.file_path).name}"')
-                elif platform.system() == "Windows":
-                    # Windows toast notification would require additional library
-                    pass
-            except:
-                pass
-            
-            # Also print to console
-            print(f"\n📋 Pending Action: {action.file_path}")
-            print(f"   Category: {action.analysis.get('category', 'Unknown')}")
-            print(f"   Suggested name: {action.proposed_action.get('new_name', 'N/A')}")
-            print(f"   Action ID: {action.action_id}")
-            print(f"   Use 'watchdock approve {action.action_id}' to approve")
-            print(f"   Use 'watchdock reject {action.action_id}' to reject\n")
-        except Exception as e:
-            logger.debug(f"Could not send notification: {e}")
-    
-    def start(self):
-        """Start the WatchDock service."""
-        logger.info("Starting WatchDock...")
-        
-        # Create file watcher
+            system = platform.system()
+            if system == "Darwin" and shutil.which("osascript"):
+                script = (
+                    "on run argv\n"
+                    'display notification (item 1 of argv) with title "WatchDock"\n'
+                    "end run"
+                )
+                subprocess.run(
+                    ["osascript", "-e", script, "--", filename],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+            elif system == "Linux" and shutil.which("notify-send"):
+                subprocess.run(
+                    ["notify-send", "WatchDock", f"Review action for: {filename}"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+        except OSError as exc:
+            logger.debug("Could not send desktop notification: %s", exc)
+
+        print(f"[REVIEW] {action.file_path}")
+        print(f"  Category: {action.analysis.get('category', 'Unknown')}")
+        print(f"  Destination: {action.proposed_action.get('to', 'N/A')}")
+        print(f"  Action ID: {action.action_id}")
+        print(f"  Approve: watchdock approve {action.action_id}")
+        print(f"  Reject:  watchdock reject {action.action_id}")
+
+    def start(self) -> None:
+        """Start monitoring and block until stopped."""
+
+        if self.running:
+            return
         self.watcher = FileWatcher(
             self.config.watched_folders,
-            self.process_file
+            self.process_file,
+            check_interval=self.config.check_interval,
+            excluded_roots=[self.config.archive_config.base_path],
         )
-        
-        # Start watching
-        self.watcher.start()
+        if not self.watcher.start():
+            raise RuntimeError("no enabled, existing watched folders are available")
+
         self.running = True
-        
         logger.info("WatchDock is running. Press Ctrl+C to stop.")
-        
-        # Keep running
         try:
             while self.running and self.watcher.is_alive():
-                import time
-                time.sleep(1)
+                time.sleep(0.25)
         except KeyboardInterrupt:
             logger.info("Received interrupt signal")
         finally:
             self.stop()
-    
-    def stop(self):
-        """Stop the WatchDock service."""
-        logger.info("Stopping WatchDock...")
+
+    def stop(self) -> None:
+        """Stop monitoring; repeated calls are safe."""
+
         self.running = False
         if self.watcher:
             self.watcher.stop()
         logger.info("WatchDock stopped")
 
 
-def _check_pypi_version():
-    """Check PyPI for latest version. Returns (latest_version, error_message)."""
+def _check_pypi_version() -> Tuple[Optional[str], Optional[str]]:
+    """Return the latest PyPI version and an optional error message."""
+
     try:
-        url = "https://pypi.org/pypi/watchdock/json"
-        with urllib.request.urlopen(url, timeout=5) as response:
-            data = json.loads(response.read())
-            return data['info']['version'], None
-    except Exception as e:
-        return None, str(e)
-
-
-def cmd_version(args):
-    """Show version information and check for updates."""
-    current_version = __version__
-    print(f"WatchDock version {current_version}")
-    
-    # Check for updates
-    latest_version, error = _check_pypi_version()
-    if error:
-        print(f"⚠️  Could not check for updates: {error}")
-        return 0
-    
-    if latest_version:
-        if packaging_version.parse(latest_version) > packaging_version.parse(current_version):
-            print(f"⚠️  Update available: {latest_version}")
-            print(f"   Run 'watchdock update' to install the latest version.")
-        else:
-            print(f"✅ You are running the latest version ({current_version})")
-    
-    return 0
-
-
-def cmd_update(args):
-    """Install updates from PyPI."""
-    current_version = __version__
-    print("Checking for updates...")
-    
-    latest_version, error = _check_pypi_version()
-    if error:
-        print(f"❌ Error checking for updates: {error}")
-        print("You can manually update with: pip install -U watchdock")
-        return 1
-    
-    if not latest_version:
-        print("❌ Could not determine latest version")
-        return 1
-    
-    if packaging_version.parse(latest_version) > packaging_version.parse(current_version):
-        print(f"Update available: {current_version} → {latest_version}")
-        print("Installing update...")
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--upgrade", "watchdock"],
-            check=False
+        request = urllib.request.Request(
+            "https://pypi.org/pypi/watchdock/json",
+            headers={"User-Agent": f"WatchDock/{__version__}"},
         )
-        if result.returncode == 0:
-            print("✅ Update installed successfully!")
-            return 0
-        else:
-            print("❌ Update failed. Try running: pip install -U watchdock")
-            return 1
+        with urllib.request.urlopen(request, timeout=5) as response:
+            data = json.loads(response.read())
+        return str(data["info"]["version"]), None
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        return None, str(exc)
+
+
+def cmd_version(args: argparse.Namespace) -> int:
+    print(f"WatchDock {__version__}")
+    if not getattr(args, "check", False):
+        return 0
+
+    latest_version, error = _check_pypi_version()
+    if error:
+        print(f"[WARN] Could not check PyPI: {error}")
+        return 0
+    if latest_version and packaging_version.parse(
+        latest_version
+    ) > packaging_version.parse(__version__):
+        print(f"[UPDATE] {latest_version} is available")
     else:
-        print(f"✅ You are already running the latest version ({current_version})")
-        return 0
-
-
-def cmd_status(args):
-    """Show WatchDock status."""
-    config_path = Path(args.config)
-    
-    if not config_path.exists():
-        print("❌ Configuration file not found")
-        print(f"   Expected at: {config_path}")
-        print("   Run 'watchdock config init' to create one.")
-        return 1
-    
-    try:
-        config = WatchDockConfig.load(str(config_path))
-        print("✅ Configuration loaded")
-        print(f"   Mode: {config.mode.upper()}")
-        print(f"   Watched folders: {len(config.watched_folders)}")
-        for folder in config.watched_folders:
-            exists = "✅" if Path(folder).exists() else "❌"
-            print(f"     {exists} {folder}")
-        print(f"   AI Provider: {config.ai_config.provider}")
-        print(f"   Archive: {config.archive_config.archive_path}")
-    except Exception as e:
-        print(f"❌ Error loading configuration: {e}")
-        return 1
-    
+        print("[OK] Installed version is current")
     return 0
 
 
-def cmd_config_init(args):
-    """Initialize default configuration."""
-    config = WatchDockConfig.default()
-    config_path = Path(args.config)
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config.save(str(config_path))
-    print(f"✅ Default configuration created at: {config_path}")
-    print("Please edit the configuration file and add your API keys if needed.")
+def cmd_update(_args: argparse.Namespace) -> int:
+    if getattr(sys, "frozen", False):
+        print("[ERROR] Self-update is unavailable in a standalone executable.")
+        print(
+            "Download the latest release from https://github.com/Z-MarkUs/WatchDock/releases"
+        )
+        return 1
+
+    latest_version, error = _check_pypi_version()
+    if error or not latest_version:
+        print(f"[ERROR] Could not check PyPI: {error or 'unknown response'}")
+        return 1
+    if packaging_version.parse(latest_version) <= packaging_version.parse(__version__):
+        print(f"[OK] WatchDock {__version__} is current")
+        return 0
+
+    print(f"Updating WatchDock {__version__} -> {latest_version}")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--upgrade", "watchdock"],
+        check=False,
+    )
+    if result.returncode:
+        print("[ERROR] Update failed. Run: python -m pip install -U watchdock")
+        return 1
+    print("[OK] Update installed")
     return 0
 
 
-def cmd_config_validate(args):
-    """Validate configuration file."""
-    config_path = Path(args.config)
-    
-    if not config_path.exists():
-        print(f"❌ Configuration file not found: {config_path}")
+def _config_path(args: argparse.Namespace) -> Path:
+    return Path(args.config).expanduser()
+
+
+def _state_dir(args: argparse.Namespace) -> Path:
+    return _config_path(args).parent
+
+
+def _queue_for_args(args: argparse.Namespace) -> PendingActionsQueue:
+    return PendingActionsQueue(db_path=_state_dir(args) / "pending_actions.sqlite3")
+
+
+def _load_existing_config(args: argparse.Namespace) -> WatchDockConfig:
+    path = _config_path(args)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"configuration not found: {path} (run 'watchdock config init')"
+        )
+    return WatchDockConfig.load(str(path))
+
+
+def cmd_config_init(args: argparse.Namespace) -> int:
+    path = _config_path(args)
+    if path.exists() and not args.force:
+        print(f"[ERROR] Configuration already exists: {path}")
+        print("Use --force only if you intend to replace it.")
         return 1
-    
-    try:
-        config = WatchDockConfig.load(str(config_path))
-        print("✅ Configuration is valid")
+
+    WatchDockConfig.default().save(str(path))
+    print(f"[OK] Created review-first configuration: {path}")
+    print("Set a provider API key through an environment variable or configure Ollama.")
+    return 0
+
+
+def cmd_config_validate(args: argparse.Namespace) -> int:
+    config = _load_existing_config(args)
+    config.validate()
+    print(f"[OK] Configuration is valid: {_config_path(args)}")
+    return 0
+
+
+def cmd_config_show(args: argparse.Namespace) -> int:
+    data = _load_existing_config(args).to_dict()
+    if data["ai_config"].get("api_key"):
+        data["ai_config"]["api_key"] = "***configured***"
+    print(json.dumps(data, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _status_payload(args: argparse.Namespace) -> Dict[str, Any]:
+    config = _load_existing_config(args)
+    queue = _queue_for_args(args)
+    folder_status = []
+    for folder in config.watched_folders:
+        path = Path(folder.path)
+        folder_status.append(
+            {
+                "path": str(path),
+                "enabled": folder.enabled,
+                "exists": path.is_dir(),
+                "recursive": folder.recursive,
+                "file_extensions": folder.file_extensions,
+            }
+        )
+
+    queue_counts = {
+        status: len(queue.list_actions([status]))
+        for status in ("pending", "processing", "failed", "completed", "rejected")
+    }
+    if config.ai_config.provider in {"openai", "anthropic"}:
+        provider_ready = bool(config.ai_config.resolved_api_key())
+    else:
+        provider_ready = True
+
+    return {
+        "version": __version__,
+        "config_path": str(_config_path(args)),
+        "mode": config.mode,
+        "watched_folders": folder_status,
+        "ai": {
+            "provider": config.ai_config.provider,
+            "model": config.ai_config.model,
+            "configured": provider_ready,
+        },
+        "archive_path": config.archive_config.base_path,
+        "queue": queue_counts,
+    }
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    payload = _status_payload(args)
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
         return 0
-    except Exception as e:
-        print(f"❌ Configuration error: {e}")
+
+    print(f"WatchDock {payload['version']}")
+    print(f"  Config:  {payload['config_path']}")
+    print(f"  Mode:    {payload['mode'].upper()}")
+    print(
+        f"  AI:      {payload['ai']['provider']} / {payload['ai']['model']} "
+        f"({'ready' if payload['ai']['configured'] else 'review-only fallback'})"
+    )
+    print(f"  Archive: {payload['archive_path']}")
+    print("  Watched folders:")
+    for folder in payload["watched_folders"]:
+        marker = "OK" if folder["enabled"] and folder["exists"] else "MISSING"
+        if not folder["enabled"]:
+            marker = "DISABLED"
+        print(f"    [{marker}] {folder['path']}")
+    print(
+        "  Queue:   "
+        + ", ".join(f"{key}={value}" for key, value in payload["queue"].items())
+    )
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    config = _load_existing_config(args)
+    checks: List[Tuple[str, str, str]] = []
+
+    enabled_folders = [folder for folder in config.watched_folders if folder.enabled]
+    if not enabled_folders:
+        checks.append(("ERROR", "watch folders", "no folders are enabled"))
+    for folder in enabled_folders:
+        path = Path(folder.path)
+        level = "OK" if path.is_dir() else "ERROR"
+        message = str(path) if path.is_dir() else f"missing directory: {path}"
+        checks.append((level, "watch folder", message))
+
+    archive = Path(config.archive_config.base_path)
+    try:
+        archive.mkdir(parents=True, exist_ok=True)
+        probe = archive / ".watchdock-write-test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        checks.append(("OK", "archive", f"writable: {archive}"))
+    except OSError as exc:
+        checks.append(("ERROR", "archive", str(exc)))
+
+    provider = config.ai_config.provider
+    if provider in {"openai", "anthropic"}:
+        module_name = provider
+        if importlib.util.find_spec(module_name) is None:
+            checks.append(
+                ("ERROR", "provider package", f"install WatchDock[{provider}]")
+            )
+        else:
+            checks.append(("OK", "provider package", module_name))
+        if config.ai_config.resolved_api_key():
+            checks.append(("OK", "provider credential", "environment/config key found"))
+        else:
+            level = "ERROR" if config.mode == "auto" else "WARN"
+            checks.append((level, "provider credential", "review-only rules fallback"))
+    else:
+        checks.append(
+            (
+                "OK",
+                "provider endpoint",
+                config.ai_config.base_url or "http://localhost:11434/v1",
+            )
+        )
+
+    try:
+        queue = _queue_for_args(args)
+        queue.list_actions(limit=1)
+        checks.append(("OK", "approval queue", str(queue.db_path)))
+    except (OSError, ValueError) as exc:
+        checks.append(("ERROR", "approval queue", str(exc)))
+
+    for level, name, message in checks:
+        print(f"[{level}] {name}: {message}")
+    errors = sum(1 for level, _name, _message in checks if level == "ERROR")
+    warnings = sum(1 for level, _name, _message in checks if level == "WARN")
+    print(f"Doctor result: {errors} error(s), {warnings} warning(s)")
+    return 1 if errors else 0
+
+
+def _print_action(action: PendingAction) -> None:
+    print(f"  ID:          {action.action_id}")
+    print(f"  Status:      {action.status}")
+    print(f"  Source:      {action.file_path}")
+    print(f"  Destination: {action.proposed_action.get('to', 'N/A')}")
+    print(f"  Category:    {action.analysis.get('category', 'Unknown')}")
+    if action.error:
+        print(f"  Error:       {action.error}")
+
+
+def cmd_list_pending(args: argparse.Namespace) -> int:
+    queue = _queue_for_args(args)
+    statuses = None if args.all else ["pending", "failed"]
+    actions = queue.list_actions(statuses)
+    if not actions:
+        print("No reviewable actions.")
+        return 0
+    print(f"Reviewable actions ({len(actions)}):")
+    for action in actions:
+        _print_action(action)
+        print()
+    return 0
+
+
+def _execute_claimed_action(
+    config: WatchDockConfig,
+    queue: PendingActionsQueue,
+    action: PendingAction,
+) -> Tuple[bool, Dict[str, Any]]:
+    if not queue.source_matches(action):
+        error = "source changed after review; re-analysis is required"
+        queue.fail(action.action_id, error)
+        return False, {"error": error}
+
+    try:
+        organizer = FileOrganizer(config.archive_config)
+        result = organizer.execute_proposed_action(action.proposed_action)
+    except Exception as exc:
+        queue.fail(action.action_id, str(exc))
+        return False, {"error": str(exc)}
+    if result.get("error"):
+        queue.fail(action.action_id, str(result["error"]))
+        return False, result
+    queue.complete(action.action_id)
+    return True, result
+
+
+def cmd_approve(args: argparse.Namespace) -> int:
+    config = _load_existing_config(args)
+    configure_logging(config.log_level, _state_dir(args) / "logs" / "watchdock.log")
+    queue = _queue_for_args(args)
+    action = queue.claim(args.action_id, worker_id="cli")
+    if action is None:
+        existing = queue.get_by_id(args.action_id)
+        status = existing.status if existing else "not found"
+        print(f"[ERROR] Action is not claimable ({status}): {args.action_id}")
         return 1
 
+    success, result = _execute_claimed_action(config, queue, action)
+    if not success:
+        print(f"[ERROR] Action retained as failed: {result['error']}")
+        return 1
+    print(f"[OK] Completed action: {action.action_id}")
+    print(f"  Destination: {result['new_path']}")
+    return 0
 
-def cmd_gui(args):
-    """Launch GUI configuration tool."""
+
+def cmd_reject(args: argparse.Namespace) -> int:
+    action = _queue_for_args(args).reject(args.action_id)
+    if action is None:
+        print(f"[ERROR] Action is not rejectable: {args.action_id}")
+        return 1
+    print(f"[OK] Rejected action: {action.action_id}")
+    return 0
+
+
+def cmd_retry(args: argparse.Namespace) -> int:
+    action = _queue_for_args(args).retry(args.action_id)
+    if action is None:
+        print(f"[ERROR] Only failed actions can be retried: {args.action_id}")
+        return 1
+    print(f"[OK] Returned action to pending: {action.action_id}")
+    return 0
+
+
+def cmd_process(args: argparse.Namespace) -> int:
+    config = _load_existing_config(args)
+    state_dir = _state_dir(args)
+    processor = AIProcessor(
+        config.ai_config, examples_path=state_dir / "few_shot_examples.json"
+    )
+    organizer = FileOrganizer(config.archive_config)
+    source = str(Path(args.file).expanduser().resolve())
+    analysis = processor.analyze_file(source)
+    proposal = organizer.get_proposed_action(source, analysis)
+
+    print(
+        json.dumps(
+            {"analysis": analysis, "proposal": proposal}, indent=2, ensure_ascii=False
+        )
+    )
+    if args.queue:
+        action = _queue_for_args(args).add(source, analysis, proposal)
+        print(f"[REVIEW] Queued as {action.action_id}")
+        return 0
+    if not args.apply:
+        print(
+            "Dry run only. Use --queue for review or --apply for a high-confidence result."
+        )
+        return 0
+    if analysis.get("requires_review"):
+        print(
+            "[ERROR] Low-confidence/fallback analysis cannot be applied automatically."
+        )
+        return 1
+
+    result = organizer.organize_file(source, analysis)
+    if result.get("error"):
+        print(f"[ERROR] {result['error']}")
+        return 1
+    print(f"[OK] Organized file at {result['new_path']}")
+    return 0
+
+
+def cmd_start(args: argparse.Namespace) -> int:
+    config = _load_existing_config(args)
+    configure_logging(config.log_level, _state_dir(args) / "logs" / "watchdock.log")
+    service = WatchDock(config, state_dir=_state_dir(args))
+
+    def signal_handler(_signal_number: int, _frame: Any) -> None:
+        service.stop()
+
+    try:
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+    except ValueError:
+        logger.debug("Signal handlers are only available in the main thread")
+
+    service.start()
+    return 0
+
+
+def cmd_gui(args: argparse.Namespace) -> int:
+    config_path = _config_path(args)
+    if config_path.exists():
+        config = WatchDockConfig.load(str(config_path))
+        configure_logging(
+            config.log_level, config_path.parent / "logs" / "watchdock.log"
+        )
     try:
         from watchdock.gui import run_gui
-        run_gui()
-        return 0
-    except ImportError:
-        print("Error: GUI requires tkinter. Install it or use command-line mode.")
+
+        run_gui(config_path=str(config_path))
+    except ImportError as exc:
+        print(f"[ERROR] GUI requires tkinter: {exc}")
         return 1
-
-
-def cmd_approve(args):
-    """Approve a pending action."""
-    config_path = Path(args.config)
-    if not config_path.exists():
-        print(f"Configuration file not found: {config_path}")
-        return 1
-    
-    config = WatchDockConfig.load(str(config_path))
-    queue = PendingActionsQueue()
-    action = queue.approve(args.action_id)
-    
-    if action:
-        from watchdock.file_organizer import FileOrganizer
-        organizer = FileOrganizer(config.archive_config)
-        result = organizer.organize_file(action.file_path, action.analysis)
-        print(f"✅ Approved and executed: {action.file_path}")
-        print(f"   Result: {result}")
-        queue.remove(action.action_id)
-        return 0
-    else:
-        print(f"❌ Action not found: {args.action_id}")
-        return 1
-
-
-def cmd_reject(args):
-    """Reject a pending action."""
-    queue = PendingActionsQueue()
-    action = queue.reject(args.action_id)
-    
-    if action:
-        print(f"❌ Rejected: {action.file_path}")
-        queue.remove(action.action_id)
-        return 0
-    else:
-        print(f"❌ Action not found: {args.action_id}")
-        return 1
-
-
-def cmd_list_pending(args):
-    """List all pending actions."""
-    queue = PendingActionsQueue()
-    pending = queue.get_pending()
-    
-    if pending:
-        print(f"\n📋 Pending Actions ({len(pending)}):\n")
-        for action in pending:
-            print(f"  ID: {action.action_id}")
-            print(f"  File: {action.file_path}")
-            print(f"  Category: {action.analysis.get('category', 'Unknown')}")
-            print(f"  Suggested: {action.proposed_action.get('new_name', 'N/A')}")
-            print()
-    else:
-        print("No pending actions.")
     return 0
 
 
-def cmd_start(args):
-    """Start WatchDock monitoring."""
-    config_path = Path(args.config)
-    if not config_path.exists():
-        print(f"Configuration file not found: {config_path}")
-        print("Run 'watchdock config init' to create a default configuration file.")
-        return 1
-    
-    config = WatchDockConfig.load(str(config_path))
-    watchdock = WatchDock(config)
-    
-    # Handle signals for graceful shutdown
-    def signal_handler(sig, frame):
-        watchdock.stop()
-        sys.exit(0)
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    # Start the service
-    watchdock.start()
+def _cmd_help(args: argparse.Namespace) -> int:
+    args.help_parser.print_help()
     return 0
 
 
-def main():
-    """Main entry point."""
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="WatchDock - File monitoring and organization tool",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        prog="watchdock",
+        description="Safely analyze and organize watched files",
     )
-    
     parser.add_argument(
-        '--config',
-        type=str,
-        default=str(Path.home() / '.watchdock' / 'config.json'),
-        help='Path to configuration file'
+        "--config",
+        default=str(default_config_path()),
+        help="configuration path (accepted before or after a subcommand)",
     )
-    
-    subparsers = parser.add_subparsers(dest='command', help='Available commands')
-    
-    # Version command
-    version_parser = subparsers.add_parser('version', help='Show version information')
+    parser.add_argument(
+        "--version", action="version", version=f"WatchDock {__version__}"
+    )
+    subparsers = parser.add_subparsers(dest="command", title="commands")
+
+    version_parser = subparsers.add_parser("version", help="show installed version")
+    version_parser.add_argument("--check", action="store_true", help="check PyPI")
     version_parser.set_defaults(func=cmd_version)
-    
-    # Update command
-    update_parser = subparsers.add_parser('update', help='Install updates from PyPI')
-    update_parser.set_defaults(func=cmd_update)
-    
-    # Status command
-    status_parser = subparsers.add_parser('status', help='Show WatchDock status')
+
+    subparsers.add_parser("update", help="update a pip installation").set_defaults(
+        func=cmd_update
+    )
+
+    status_parser = subparsers.add_parser("status", help="show configuration status")
+    status_parser.add_argument("--json", action="store_true")
     status_parser.set_defaults(func=cmd_status)
-    
-    # Config command
-    config_parser = subparsers.add_parser('config', help='Configuration management')
-    config_subparsers = config_parser.add_subparsers(dest='config_command', help='Config commands')
-    
-    config_init_parser = config_subparsers.add_parser('init', help='Initialize default configuration')
-    config_init_parser.set_defaults(func=cmd_config_init)
-    
-    config_validate_parser = config_subparsers.add_parser('validate', help='Validate configuration file')
-    config_validate_parser.set_defaults(func=cmd_config_validate)
-    
-    # GUI command
-    gui_parser = subparsers.add_parser('gui', help='Launch GUI configuration tool')
-    gui_parser.set_defaults(func=cmd_gui)
-    
-    # HITL commands
-    approve_parser = subparsers.add_parser('approve', help='Approve a pending action (HITL mode)')
-    approve_parser.add_argument('action_id', help='Action ID to approve')
+
+    doctor_parser = subparsers.add_parser("doctor", help="run readiness checks")
+    doctor_parser.set_defaults(func=cmd_doctor)
+
+    config_parser = subparsers.add_parser("config", help="manage configuration")
+    config_parser.set_defaults(func=_cmd_help, help_parser=config_parser)
+    config_subparsers = config_parser.add_subparsers(dest="config_command")
+    init_parser = config_subparsers.add_parser("init", help="create safe defaults")
+    init_parser.add_argument("--force", action="store_true")
+    init_parser.set_defaults(func=cmd_config_init)
+    config_subparsers.add_parser(
+        "validate", help="validate JSON and values"
+    ).set_defaults(func=cmd_config_validate)
+    config_subparsers.add_parser(
+        "show", help="show redacted configuration"
+    ).set_defaults(func=cmd_config_show)
+
+    subparsers.add_parser("gui", help="launch the desktop application").set_defaults(
+        func=cmd_gui
+    )
+    subparsers.add_parser("start", help="start foreground monitoring").set_defaults(
+        func=cmd_start
+    )
+
+    process_parser = subparsers.add_parser(
+        "process", help="analyze one file (dry run by default)"
+    )
+    process_parser.add_argument("file")
+    process_choice = process_parser.add_mutually_exclusive_group()
+    process_choice.add_argument("--queue", action="store_true")
+    process_choice.add_argument("--apply", action="store_true")
+    process_parser.set_defaults(func=cmd_process)
+
+    list_parser = subparsers.add_parser(
+        "list-pending", help="list pending and failed review actions"
+    )
+    list_parser.add_argument("--all", action="store_true")
+    list_parser.set_defaults(func=cmd_list_pending)
+
+    approve_parser = subparsers.add_parser("approve", help="execute a reviewed action")
+    approve_parser.add_argument("action_id")
     approve_parser.set_defaults(func=cmd_approve)
-    
-    reject_parser = subparsers.add_parser('reject', help='Reject a pending action (HITL mode)')
-    reject_parser.add_argument('action_id', help='Action ID to reject')
+
+    reject_parser = subparsers.add_parser("reject", help="reject a review action")
+    reject_parser.add_argument("action_id")
     reject_parser.set_defaults(func=cmd_reject)
-    
-    list_pending_parser = subparsers.add_parser('list-pending', help='List all pending actions (HITL mode)')
-    list_pending_parser.set_defaults(func=cmd_list_pending)
-    
-    # Start command (default)
-    start_parser = subparsers.add_parser('start', help='Start WatchDock monitoring (default)')
-    start_parser.set_defaults(func=cmd_start)
-    
-    args = parser.parse_args()
-    
-    # If no command provided, default to start
-    if not args.command:
-        args.command = 'start'
-        args.func = cmd_start
-    
-    # Call the appropriate command function
-    return args.func(args)
+
+    retry_parser = subparsers.add_parser("retry", help="retry a failed review action")
+    retry_parser.add_argument("action_id")
+    retry_parser.set_defaults(func=cmd_retry)
+
+    parser.set_defaults(func=_cmd_help, help_parser=parser)
+    return parser
 
 
-if __name__ == '__main__':
-    sys.exit(main())
+def _normalize_global_config(argv: Sequence[str]) -> List[str]:
+    """Allow ``--config`` before or after subcommands for normal CLI ergonomics."""
 
+    values = list(argv)
+    for index, value in enumerate(values):
+        if value == "--config" and index + 1 < len(values):
+            config_value = values[index + 1]
+            return ["--config", config_value] + values[:index] + values[index + 2 :]
+        if value.startswith("--config="):
+            return [value] + values[:index] + values[index + 1 :]
+    return values
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    prepare_console()
+    parser = build_parser()
+    normalized = _normalize_global_config(
+        list(argv) if argv is not None else sys.argv[1:]
+    )
+    args = parser.parse_args(normalized)
+    try:
+        return int(args.func(args))
+    except KeyboardInterrupt:
+        print("[WARN] Interrupted")
+        return 130
+    except Exception as exc:
+        logger.debug("Command failed", exc_info=True)
+        print(f"[ERROR] {exc}")
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

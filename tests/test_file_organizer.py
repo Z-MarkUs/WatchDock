@@ -84,6 +84,58 @@ def test_conflict_never_overwrites_existing_file(tmp_path):
     assert result["new_path"].endswith("report_1.txt")
 
 
+def test_reviewed_action_executes_the_displayed_destination(tmp_path):
+    source = tmp_path / "inbox" / "draft.txt"
+    source.parent.mkdir()
+    source.write_text("draft", encoding="utf-8")
+    instance = organizer(tmp_path)
+    action = instance.get_proposed_action(
+        str(source), {"category": "Documents", "suggested_name": "final.txt"}
+    )
+
+    result = instance.execute_proposed_action(action)
+
+    assert result["error"] is None
+    assert result["new_path"] == action["to"]
+    assert Path(action["to"]).read_text(encoding="utf-8") == "draft"
+
+
+def test_reviewed_action_fails_closed_if_destination_becomes_occupied(tmp_path):
+    source = tmp_path / "inbox" / "draft.txt"
+    source.parent.mkdir()
+    source.write_text("draft", encoding="utf-8")
+    instance = organizer(tmp_path)
+    action = instance.get_proposed_action(
+        str(source), {"category": "Documents", "suggested_name": "final.txt"}
+    )
+    occupied = Path(action["to"])
+    occupied.parent.mkdir(parents=True)
+    occupied.write_text("other", encoding="utf-8")
+
+    result = instance.execute_proposed_action(action)
+
+    assert "already exists" in result["error"]
+    assert source.read_text(encoding="utf-8") == "draft"
+    assert occupied.read_text(encoding="utf-8") == "other"
+
+
+def test_tampered_reviewed_destination_is_rejected(tmp_path):
+    source = tmp_path / "draft.txt"
+    source.write_text("draft", encoding="utf-8")
+    instance = organizer(tmp_path)
+    action = {
+        "action_type": "move",
+        "from": str(source),
+        "to": str(tmp_path / "outside" / "stolen.txt"),
+        "tags": [],
+    }
+
+    result = instance.execute_proposed_action(action)
+
+    assert "escapes" in result["error"]
+    assert source.exists()
+
+
 def test_rename_in_place_handles_windows_reserved_name(tmp_path):
     source = tmp_path / "notes.txt"
     source.write_text("notes", encoding="utf-8")

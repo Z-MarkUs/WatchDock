@@ -89,7 +89,9 @@ class AIConfig:
             )
         if not self.model:
             errors.append("ai_config.model cannot be empty")
-        if not 0 <= self.temperature <= 2:
+        if not isinstance(self.temperature, (int, float)) or not (
+            0 <= self.temperature <= 2
+        ):
             errors.append("ai_config.temperature must be between 0 and 2")
         if self.provider == "ollama" and self.base_url:
             parsed = urlparse(self.base_url)
