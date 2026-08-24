@@ -1,171 +1,249 @@
-"""
-File organizer that renames, tags, and moves files based on AI analysis.
-"""
+"""Safe file organization based on analysis results."""
 
+from __future__ import annotations
+
+import json
+import logging
 import os
+import re
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
-import logging
+from typing import Any, Callable, Dict, Iterable
+
+from watchdock.config import ArchiveConfig
 
 logger = logging.getLogger(__name__)
 
+_INVALID_COMPONENTS = re.compile(r"[<>:\"/\\|?*\x00-\x1f]")
+_WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+
 
 class FileOrganizer:
-    """Organizes files based on AI analysis results."""
-    
-    def __init__(self, config):
+    """Move or rename files according to an :class:`ArchiveConfig`."""
+
+    def __init__(
+        self,
+        config: ArchiveConfig,
+        now: Callable[[], datetime] = datetime.now,
+    ) -> None:
+        if not isinstance(config, ArchiveConfig):
+            raise TypeError("FileOrganizer requires an ArchiveConfig")
+        errors = config.validate()
+        if errors:
+            raise ValueError("; ".join(errors))
+
         self.config = config
-        self.archive_base = Path(config.archive_config.base_path)
+        self.archive_base = Path(config.base_path).expanduser()
         self.archive_base.mkdir(parents=True, exist_ok=True)
-    
-    def get_proposed_action(self, file_path: str, analysis: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Get proposed action without executing it (for HITL mode).
-        
-        Returns:
-            Dict with proposed action details
-        """
-        source_path = Path(file_path)
-        
+        self._now = now
+
+    def get_proposed_action(
+        self, file_path: str, analysis: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Describe an organization action without changing the file system."""
+
+        source_path = Path(file_path).expanduser()
         if self.config.move_files:
-            dest_path = self._get_destination_path(source_path, analysis)
-            return {
-                'action_type': 'move',
-                'from': str(source_path),
-                'to': str(dest_path),
-                'new_name': dest_path.name,
-                'category': analysis.get('category', 'Other'),
-                'tags': analysis.get('tags', [])
-            }
+            destination = self._get_destination_path(source_path, analysis)
+            action_type = "move"
         else:
-            new_name = analysis.get('suggested_name', source_path.name)
-            return {
-                'action_type': 'rename',
-                'from': str(source_path),
-                'to': str(source_path.parent / new_name),
-                'new_name': new_name,
-                'category': analysis.get('category', 'Other'),
-                'tags': analysis.get('tags', [])
-            }
-    
-    def organize_file(self, file_path: str, analysis: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Organize a file based on analysis results.
-        
-        Returns:
-            Dict with operation results: moved, renamed, new_path, tags_applied
-        """
-        source_path = Path(file_path)
-        results = {
-            'original_path': str(source_path),
-            'moved': False,
-            'renamed': False,
-            'new_path': None,
-            'tags_applied': False,
-            'error': None
+            destination = source_path.parent / self._safe_filename(
+                analysis.get("suggested_name"), source_path.name
+            )
+            action_type = "rename"
+
+        return {
+            "action_type": action_type,
+            "from": str(source_path),
+            "to": str(destination),
+            "new_name": destination.name,
+            "category": self._safe_component(
+                analysis.get("category"), fallback="Other"
+            ),
+            "tags": self._safe_tags(analysis.get("tags", [])),
         }
-        
+
+    def organize_file(self, file_path: str, analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """Organize one file and return a structured operation result."""
+
+        source_path = Path(file_path).expanduser()
+        results: Dict[str, Any] = {
+            "original_path": str(source_path),
+            "moved": False,
+            "renamed": False,
+            "new_path": None,
+            "tags_applied": False,
+            "error": None,
+            "warnings": [],
+        }
+
         try:
-            # Determine destination
-            if self.config.archive_config.move_files:
-                dest_path = self._get_destination_path(source_path, analysis)
-                results['new_path'] = str(dest_path)
-                
-                # Move file
-                if dest_path != source_path:
-                    dest_path.parent.mkdir(parents=True, exist_ok=True)
-                    
-                    # Handle name conflicts
-                    if dest_path.exists():
-                        dest_path = self._handle_name_conflict(dest_path)
-                        results['new_path'] = str(dest_path)
-                    
-                    shutil.move(str(source_path), str(dest_path))
-                    results['moved'] = True
-                    logger.info(f"Moved {source_path} -> {dest_path}")
+            if not source_path.exists():
+                raise FileNotFoundError(f"file does not exist: {source_path}")
+            if not source_path.is_file():
+                raise ValueError(f"path is not a regular file: {source_path}")
+
+            if self.config.move_files:
+                destination = self._get_destination_path(source_path, analysis)
+                if self._same_path(destination, source_path):
+                    final_path = source_path
+                else:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination = self._handle_name_conflict(destination)
+                    shutil.move(str(source_path), str(destination))
+                    final_path = destination
+                    results["moved"] = True
+                    logger.info("Moved %s -> %s", source_path, destination)
             else:
-                # Just rename in place
-                new_name = analysis.get('suggested_name', source_path.name)
-                if new_name != source_path.name:
-                    dest_path = source_path.parent / new_name
-                    if dest_path.exists():
-                        dest_path = self._handle_name_conflict(dest_path)
-                    
-                    source_path.rename(dest_path)
-                    results['renamed'] = True
-                    results['new_path'] = str(dest_path)
-                    logger.info(f"Renamed {source_path} -> {dest_path}")
-            
-            # Apply tags (store in metadata file or extended attributes if supported)
-            if analysis.get('tags'):
-                self._apply_tags(results['new_path'] or str(source_path), analysis['tags'])
-                results['tags_applied'] = True
-            
-        except Exception as e:
-            logger.error(f"Error organizing file {file_path}: {e}")
-            results['error'] = str(e)
-        
+                new_name = self._safe_filename(
+                    analysis.get("suggested_name"), source_path.name
+                )
+                destination = source_path.parent / new_name
+                if self._same_path(destination, source_path):
+                    final_path = source_path
+                else:
+                    destination = self._handle_name_conflict(destination)
+                    source_path.rename(destination)
+                    final_path = destination
+                    results["renamed"] = True
+                    logger.info("Renamed %s -> %s", source_path, destination)
+
+            results["new_path"] = str(final_path)
+            tags = self._safe_tags(analysis.get("tags", []))
+            if tags:
+                try:
+                    self._apply_tags(final_path, tags)
+                    results["tags_applied"] = True
+                except OSError as exc:
+                    warning = f"could not write tag metadata: {exc}"
+                    results["warnings"].append(warning)
+                    logger.warning("%s", warning)
+        except (OSError, ValueError) as exc:
+            logger.error("Error organizing file %s: %s", file_path, exc)
+            results["error"] = str(exc)
+
         return results
-    
-    def _get_destination_path(self, source_path: Path, analysis: Dict[str, Any]) -> Path:
-        """Calculate the destination path for a file."""
-        # Start with archive base
-        dest_parts = [self.archive_base]
-        
-        # Add date folder if enabled
-        if self.config.archive_config.create_date_folders:
-            date_str = datetime.now().strftime("%Y-%m")
-            dest_parts.append(date_str)
-        
-        # Add category folder if enabled
-        if self.config.archive_config.create_category_folders:
-            category = analysis.get('category', 'Other')
-            dest_parts.append(category)
-        
-        # Build destination directory
-        dest_dir = Path(*dest_parts)
-        
-        # Use suggested name or original name
-        suggested_name = analysis.get('suggested_name', source_path.name)
-        dest_path = dest_dir / suggested_name
-        
-        return dest_path
-    
-    def _handle_name_conflict(self, path: Path) -> Path:
-        """Handle filename conflicts by appending a number."""
+
+    def is_managed_path(self, file_path: str) -> bool:
+        """Return whether a path is already under the configured archive."""
+
+        try:
+            Path(file_path).expanduser().resolve(strict=False).relative_to(
+                self.archive_base.resolve(strict=False)
+            )
+            return True
+        except ValueError:
+            return False
+
+    def _get_destination_path(
+        self, source_path: Path, analysis: Dict[str, Any]
+    ) -> Path:
+        destination = self.archive_base
+        if self.config.create_date_folders:
+            destination /= self._now().strftime("%Y-%m")
+        if self.config.create_category_folders:
+            destination /= self._safe_component(
+                analysis.get("category"), fallback="Other"
+            )
+
+        destination /= self._safe_filename(
+            analysis.get("suggested_name"), source_path.name
+        )
+        self._ensure_within_archive(destination)
+        return destination
+
+    def _ensure_within_archive(self, destination: Path) -> None:
+        try:
+            destination.resolve(strict=False).relative_to(
+                self.archive_base.resolve(strict=False)
+            )
+        except ValueError as exc:
+            raise ValueError("destination escapes the configured archive") from exc
+
+    @classmethod
+    def _safe_filename(cls, suggested_name: Any, original_name: str) -> str:
+        original = cls._safe_component(original_name, fallback="file")
+        candidate = cls._safe_component(suggested_name, fallback=original)
+
+        original_suffix = "".join(Path(original).suffixes)
+        if original_suffix and not candidate.lower().endswith(original_suffix.lower()):
+            candidate_stem = Path(candidate).stem or Path(original).stem or "file"
+            candidate = f"{candidate_stem}{original_suffix}"
+        return candidate[:240] or original
+
+    @staticmethod
+    def _safe_component(value: Any, fallback: str) -> str:
+        text = str(value or "").strip()
+        text = _INVALID_COMPONENTS.sub("_", text)
+        text = re.sub(r"\s+", "_", text)
+        text = re.sub(r"_+", "_", text).strip(" ._")
+        if not text or text in {".", ".."}:
+            text = fallback
+
+        stem = text.split(".", 1)[0].upper()
+        if stem in _WINDOWS_RESERVED_NAMES:
+            text = f"_{text}"
+        return text[:240]
+
+    @staticmethod
+    def _safe_tags(tags: Any) -> list[str]:
+        if not isinstance(tags, (list, tuple, set)):
+            return []
+        cleaned = []
+        for tag in tags:
+            value = str(tag).strip()
+            if value and value not in cleaned:
+                cleaned.append(value[:64])
+        return cleaned[:50]
+
+    @staticmethod
+    def _same_path(first: Path, second: Path) -> bool:
+        return os.path.normcase(str(first.resolve(strict=False))) == os.path.normcase(
+            str(second.resolve(strict=False))
+        )
+
+    @staticmethod
+    def _handle_name_conflict(path: Path) -> Path:
         if not path.exists():
             return path
-        
-        stem = path.stem
-        suffix = path.suffix
-        parent = path.parent
-        
-        counter = 1
-        while True:
-            new_name = f"{stem}_{counter}{suffix}"
-            new_path = parent / new_name
-            if not new_path.exists():
-                return new_path
-            counter += 1
-    
-    def _apply_tags(self, file_path: str, tags: list):
-        """Apply tags to a file (store in metadata file)."""
-        try:
-            # Create a metadata file alongside the file
-            metadata_path = Path(file_path).with_suffix('.watchdock_meta.json')
-            
-            import json
-            metadata = {
-                'tags': tags,
-                'tagged_at': datetime.now().isoformat()
-            }
-            
-            with open(metadata_path, 'w') as f:
-                json.dump(metadata, f, indent=2)
-            
-            logger.debug(f"Applied tags to {file_path}: {tags}")
-        except Exception as e:
-            logger.warning(f"Could not apply tags to {file_path}: {e}")
 
+        suffix = "".join(path.suffixes)
+        stem = path.name[: -len(suffix)] if suffix else path.name
+        for counter in range(1, 100_000):
+            candidate = path.with_name(f"{stem}_{counter}{suffix}")
+            if not candidate.exists():
+                return candidate
+        raise FileExistsError(f"could not find an available name for {path.name}")
+
+    def _apply_tags(self, file_path: Path, tags: Iterable[str]) -> None:
+        metadata_path = file_path.with_name(f"{file_path.name}.watchdock.json")
+        metadata = {
+            "tags": list(tags),
+            "tagged_at": self._now().isoformat(timespec="seconds"),
+            "file": file_path.name,
+        }
+
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=str(metadata_path.parent),
+            prefix=f".{metadata_path.name}.",
+            suffix=".tmp",
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as output:
+                json.dump(metadata, output, indent=2, ensure_ascii=False)
+                output.write("\n")
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary_name, metadata_path)
+        finally:
+            if os.path.exists(temporary_name):
+                os.unlink(temporary_name)
