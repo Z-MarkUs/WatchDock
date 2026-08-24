@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Review-first single-file workflow with dry-run `process`, explicit `--queue`
-  and `--apply` choices, durable action history, `retry`, `doctor`, redacted
-  `config show`, and JSON status output.
+  and `--apply` choices, durable action history, `retry`, `recover-stale`,
+  `doctor`, redacted `config show`, and JSON status output.
 - SQLite-backed pending-action storage with atomic claims, source fingerprints,
   failure retention, legacy JSON migration, and concurrent CLI/GUI access.
 - Portable `.watchdock.json` tag sidecars and centralized config, queue, examples,
@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generated destination components are sanitized, original extensions are
   retained, reviewed destinations are executed exactly, and a changed source or
   occupied destination fails safely instead of silently changing the action.
+- Symlink sources and resolved paths outside configured watch roots are rejected;
+  concurrent moves and sidecar creation use no-replace operations.
 - File previews are limited to supported text types and treated as untrusted
   prompt data; binary content is not parsed or uploaded as a preview.
 

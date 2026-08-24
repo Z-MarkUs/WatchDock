@@ -55,8 +55,8 @@ by most standard Python installers; `watchdock gui` reports an error if it is no
 available.
 
 The base install can produce review-only rules proposals. Because the generated
-configuration names OpenAI as its provider, `watchdock doctor` deliberately
-reports a missing OpenAI SDK as an error until you install that extra. If you
+configuration names OpenAI as its provider, `watchdock doctor` reports a missing
+OpenAI SDK as a warning in safe `hitl` mode and as an error in `auto` mode. If you
 change provider, install its required extra; Ollama also needs the `openai` extra,
 even though its current doctor check only displays the configured endpoint.
 
@@ -209,6 +209,8 @@ watchdock list-pending --all
 watchdock approve ACTION_ID
 watchdock reject ACTION_ID
 watchdock retry ACTION_ID
+watchdock recover-stale
+watchdock recover-stale --older-than SECONDS
 ```
 
 - `config init --force` replaces an existing configuration; use it deliberately.
@@ -224,6 +226,10 @@ watchdock retry ACTION_ID
   processing, completed, and rejected history.
 - `retry` changes a failed action back to pending; it does not execute it. Run
   `approve` after reviewing it again.
+- `recover-stale` marks old `processing` claims as failed for manual
+  reconciliation. Startup does this conservatively for claims older than 24
+  hours. Because a crashed process may have moved a file before recording
+  completion, inspect both source and destination before retrying.
 - `update` upgrades a pip installation after checking PyPI. A standalone build
   cannot self-update.
 - `--config PATH` is accepted before or after a subcommand and uses the selected
@@ -340,11 +346,12 @@ More detail is in [docs/SECURITY.md](docs/SECURITY.md).
 `watchdock gui` opens the Tk desktop UI for configuration, examples, monitoring,
 and review actions. Monitoring started by the GUI runs only while that GUI process
 is open. **Start Monitor** first validates and saves the current settings, then
-runs the monitor on a background thread within that process. Settings saved while
-it is already running take effect after the monitor is restarted. `watchdock
-start` likewise runs in the current terminal. WatchDock does not currently install
-a Windows service, a macOS LaunchAgent, a Linux systemd unit, a tray process, or
-an automatic-start task.
+runs the monitor on a background thread within that process. The GUI blocks Save
+and Reload while monitoring so review actions cannot diverge from the running
+configuration; stop the monitor before changing settings. `watchdock start`
+likewise runs in the current terminal. WatchDock does not currently install a
+Windows service, a macOS LaunchAgent, a Linux systemd unit, a tray process, or an
+automatic-start task.
 
 The GUI needs a working graphical display and Tk. The CLI is the supported option
 for headless sessions. Standalone application archives may be produced for tagged
@@ -363,6 +370,10 @@ and expect operating-system warnings where applicable.
   as `failed`; re-analyze the file rather than trusting the stale proposal.
 - If an action fails, inspect its error with `watchdock list-pending`, correct the
   cause, run `watchdock retry ACTION_ID`, review again, and then approve it.
+- If WatchDock exits during approval, use `watchdock recover-stale` only after
+  checking whether the source or destination already reflects the action. The
+  command intentionally records an uncertain claim as failed rather than
+  guessing that it completed.
 - A file move/rename and sidecar write are not one transaction. A sidecar failure
   is logged as a warning after the file operation may already have succeeded.
 - File arrival detection is best-effort and depends on the operating system and

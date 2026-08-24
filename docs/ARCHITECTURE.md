@@ -54,7 +54,8 @@ filesystem event or `watchdock process`
 
 The default state root is `~/.watchdock`, overridden by `WATCHDOCK_HOME`. Passing
 `--config PATH` uses `PATH`'s parent as the state directory for that CLI command.
-The config and sidecar writers use temporary files plus atomic replacement.
+Configuration and example writers use temporary files plus atomic replacement.
+Sidecars use exclusive creation so an existing metadata file is never replaced.
 SQLite uses transactions, a busy timeout, full synchronous writes, and WAL mode
 when the filesystem supports it.
 
@@ -62,6 +63,8 @@ The queue records `pending`, `processing`, `completed`, `rejected`, and `failed`
 states. A claim is an atomic state transition, so concurrent CLI, GUI, and watcher
 processes cannot normally execute the same pending action. A failed action remains
 auditable and must be returned to pending explicitly before another approval.
+Startup marks processing claims older than 24 hours failed for reconciliation;
+`recover-stale` exposes the same conservative transition with an explicit age.
 
 ## Safety invariants
 
@@ -73,6 +76,10 @@ auditable and must be returned to pending explicitly before another approval.
   components are sanitized.
 - Approval checks the source fingerprint and refuses a newly occupied reviewed
   destination.
+- Sources must be non-symlink regular files whose lexical and resolved paths stay
+  within an enabled watched root.
+- Destination files and metadata sidecars are created without replacing existing
+  directory entries.
 - The archive and tag sidecars are excluded from watching to prevent loops.
 
 These controls reduce accidental moves; they do not replace backups or provide a

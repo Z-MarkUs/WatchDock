@@ -60,8 +60,9 @@ database while it is live may produce an incomplete snapshot.
 WatchDock validates configuration overlap, confines move proposals to the archive,
 keeps renames in the source directory, sanitizes provider-proposed path
 components, preserves extensions, and refuses to overwrite the exact destination
-of a reviewed action. It also fingerprints queued sources and fails approval if a
-source changed after review.
+or sidecar of a reviewed action. It rejects symlink sources and watch-root escapes,
+and it fingerprints queued sources so approval fails if a source changed after
+review.
 
 There is still no undo, rollback transaction, malware scanner, content-safety
 classifier, access-control layer, or cryptographic verification of the source

@@ -63,6 +63,30 @@ jobs:
         shell: bash
         run: ./dist/watchdock-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}${{ matrix.executable-extension }} --help
 
+      - name: Smoke test Windows GUI executable startup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GUI_EXECUTABLE: dist\WatchDock-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}.exe
+          GUI_CONFIG: ${{ runner.temp }}\watchdock-gui-smoke\config.json
+        run: |
+          $process = Start-Process `
+            -FilePath $env:GUI_EXECUTABLE `
+            -ArgumentList '--config', $env:GUI_CONFIG `
+            -PassThru `
+            -WindowStyle Hidden
+          try {
+            Start-Sleep -Seconds 5
+            if ($process.HasExited) {
+              throw "WatchDock GUI exited during startup with code $($process.ExitCode)"
+            }
+          }
+          finally {
+            if (-not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force
+            }
+          }
+
       - name: Package platform applications
         env:
           ARTIFACT_BASENAME: watchdock-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}
