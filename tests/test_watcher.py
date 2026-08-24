@@ -374,3 +374,35 @@ def test_real_observer_processes_one_stable_allowed_file(tmp_path):
         assert calls == [str(target.resolve())]
     finally:
         watcher.stop()
+
+
+def test_symlink_event_never_processes_external_target(tmp_path):
+    calls = []
+    watcher, observer, inbox = make_fake_watcher(
+        tmp_path,
+        calls.append,
+        max_retries=0,
+    )
+    target = tmp_path / "outside-secret.txt"
+    target.write_text("keep outside", encoding="utf-8")
+    link = inbox / "download.txt"
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        import pytest
+
+        pytest.skip(f"symlink creation is unavailable: {exc}")
+
+    assert watcher.start()
+    try:
+        observer.scheduled[0][0].on_created(FileCreatedEvent(str(link)))
+        with watcher._condition:
+            assert watcher._pending
+            queued_path = next(iter(watcher._pending.values())).path
+        assert queued_path == str(link.absolute())
+        assert wait_until(lambda: not watcher._pending)
+        assert calls == []
+        assert link.is_symlink()
+        assert target.read_text(encoding="utf-8") == "keep outside"
+    finally:
+        watcher.stop()

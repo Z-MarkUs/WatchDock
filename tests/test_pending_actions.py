@@ -394,3 +394,27 @@ def test_corrupt_legacy_json_does_not_prevent_new_sqlite_actions(tmp_path):
 
     action = _add_action(queue, source)
     assert queue.get_by_id(action.action_id).status == "pending"
+
+
+def test_add_rejects_symlink_source_instead_of_freezing_external_target(tmp_path):
+    queue = _queue(tmp_path)
+    target = _source(tmp_path, "outside.txt", "outside")
+    link = tmp_path / "review-me.txt"
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"symlink creation is unavailable: {exc}")
+
+    with pytest.raises(ValueError, match="regular source file"):
+        queue.add(
+            str(link),
+            {"category": "Documents"},
+            {
+                "action_type": "move",
+                "from": str(link),
+                "to": str(tmp_path / "archive" / "outside.txt"),
+            },
+        )
+
+    assert target.read_text(encoding="utf-8") == "outside"
+    assert queue.get_pending() == []

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
 import re
 import shutil
-import tempfile
+import stat as stat_module
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable
@@ -52,16 +53,24 @@ class FileOrganizer:
         """Describe an organization action without changing the file system."""
 
         source_path = Path(file_path).expanduser()
+        tags = self._safe_tags(analysis.get("tags", []))
         if self.config.move_files:
             destination = self._get_destination_path(source_path, analysis)
-            destination = self._handle_name_conflict(destination)
+            destination = self._handle_name_conflict(
+                destination,
+                source_path=source_path,
+                sidecar_required=True,
+            )
             action_type = "move"
         else:
             destination = source_path.parent / self._safe_filename(
                 analysis.get("suggested_name"), source_path.name
             )
-            if not self._same_path(destination, source_path):
-                destination = self._handle_name_conflict(destination)
+            destination = self._handle_name_conflict(
+                destination,
+                source_path=source_path,
+                sidecar_required=True,
+            )
             action_type = "rename"
 
         return {
@@ -72,7 +81,7 @@ class FileOrganizer:
             "category": self._safe_component(
                 analysis.get("category"), fallback="Other"
             ),
-            "tags": self._safe_tags(analysis.get("tags", [])),
+            "tags": tags,
         }
 
     def execute_proposed_action(
@@ -88,6 +97,7 @@ class FileOrganizer:
         source_value = proposed_action.get("from")
         destination_value = proposed_action.get("to")
         action_type = proposed_action.get("action_type")
+        tags = self._safe_tags(proposed_action.get("tags", []))
         source = Path(str(source_value or "")).expanduser()
         destination = Path(str(destination_value or "")).expanduser()
         results = self._empty_result(source)
@@ -97,8 +107,7 @@ class FileOrganizer:
                 raise ValueError("proposed action_type must be move or rename")
             if not source_value or not destination_value:
                 raise ValueError("proposed action requires from and to paths")
-            if not source.exists() or not source.is_file():
-                raise FileNotFoundError(f"file does not exist: {source}")
+            source_stat = self._require_regular_source(source)
 
             safe_name = self._safe_filename(destination.name, source.name)
             if destination.name != safe_name:
@@ -109,27 +118,35 @@ class FileOrganizer:
             elif not self._same_path(destination.parent, source.parent):
                 raise ValueError("rename destination must remain in the source folder")
 
-            if destination.exists() and not self._same_path(destination, source):
+            if self._path_entry_exists(destination) and not self._same_path(
+                destination, source
+            ):
                 raise FileExistsError(
                     f"reviewed destination already exists: {destination}"
+                )
+            if self._path_entry_exists(self._metadata_path(destination)):
+                raise FileExistsError(
+                    f"reviewed metadata destination already exists: "
+                    f"{self._metadata_path(destination)}"
                 )
 
             destination.parent.mkdir(parents=True, exist_ok=True)
             if self._same_path(destination, source):
                 final_path = source
-            elif action_type == "move":
-                shutil.move(str(source), str(destination))
-                final_path = destination
-                results["moved"] = True
             else:
-                source.rename(destination)
+                if action_type == "move":
+                    self._ensure_within_archive(destination)
+                self._move_without_overwrite(
+                    source,
+                    destination,
+                    source_stat,
+                    require_archive=action_type == "move",
+                )
                 final_path = destination
-                results["renamed"] = True
+                results["moved" if action_type == "move" else "renamed"] = True
 
             results["new_path"] = str(final_path)
-            self._write_tags_result(
-                results, final_path, self._safe_tags(proposed_action.get("tags", []))
-            )
+            self._write_tags_result(results, final_path, tags)
         except (OSError, ValueError) as exc:
             results["error"] = str(exc)
             logger.error("Could not execute reviewed action for %s: %s", source, exc)
@@ -142,10 +159,8 @@ class FileOrganizer:
         results = self._empty_result(source_path)
 
         try:
-            if not source_path.exists():
-                raise FileNotFoundError(f"file does not exist: {source_path}")
-            if not source_path.is_file():
-                raise ValueError(f"path is not a regular file: {source_path}")
+            source_stat = self._require_regular_source(source_path)
+            tags = self._safe_tags(analysis.get("tags", []))
 
             if self.config.move_files:
                 destination = self._get_destination_path(source_path, analysis)
@@ -153,8 +168,18 @@ class FileOrganizer:
                     final_path = source_path
                 else:
                     destination.parent.mkdir(parents=True, exist_ok=True)
-                    destination = self._handle_name_conflict(destination)
-                    shutil.move(str(source_path), str(destination))
+                    destination = self._handle_name_conflict(
+                        destination,
+                        source_path=source_path,
+                        sidecar_required=True,
+                    )
+                    self._ensure_within_archive(destination)
+                    self._move_without_overwrite(
+                        source_path,
+                        destination,
+                        source_stat,
+                        require_archive=True,
+                    )
                     final_path = destination
                     results["moved"] = True
                     logger.info("Moved %s -> %s", source_path, destination)
@@ -163,19 +188,26 @@ class FileOrganizer:
                     analysis.get("suggested_name"), source_path.name
                 )
                 destination = source_path.parent / new_name
+                destination = self._handle_name_conflict(
+                    destination,
+                    source_path=source_path,
+                    sidecar_required=True,
+                )
                 if self._same_path(destination, source_path):
                     final_path = source_path
                 else:
-                    destination = self._handle_name_conflict(destination)
-                    source_path.rename(destination)
+                    self._move_without_overwrite(
+                        source_path,
+                        destination,
+                        source_stat,
+                        require_archive=False,
+                    )
                     final_path = destination
                     results["renamed"] = True
                     logger.info("Renamed %s -> %s", source_path, destination)
 
             results["new_path"] = str(final_path)
-            self._write_tags_result(
-                results, final_path, self._safe_tags(analysis.get("tags", []))
-            )
+            self._write_tags_result(results, final_path, tags)
         except (OSError, ValueError) as exc:
             logger.error("Error organizing file %s: %s", file_path, exc)
             results["error"] = str(exc)
@@ -243,6 +275,168 @@ class FileOrganizer:
         except ValueError as exc:
             raise ValueError("destination escapes the configured archive") from exc
 
+    @staticmethod
+    def _require_regular_source(source: Path) -> os.stat_result:
+        """Return an lstat result, rejecting symlinks and special files."""
+
+        try:
+            source_stat = source.lstat()
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(f"file does not exist: {source}") from exc
+        if not stat_module.S_ISREG(source_stat.st_mode):
+            raise ValueError(f"path is not a regular file: {source}")
+        return source_stat
+
+    @staticmethod
+    def _file_identity(file_stat: os.stat_result) -> tuple[int, int, int, int]:
+        return (
+            file_stat.st_dev,
+            file_stat.st_ino,
+            file_stat.st_size,
+            file_stat.st_mtime_ns,
+        )
+
+    @staticmethod
+    def _path_entry_exists(path: Path) -> bool:
+        """Return true for every directory entry, including broken symlinks."""
+
+        return os.path.lexists(path)
+
+    def _move_without_overwrite(
+        self,
+        source: Path,
+        destination: Path,
+        expected_source_stat: os.stat_result,
+        *,
+        require_archive: bool,
+    ) -> None:
+        """Move one regular file without ever replacing an existing entry.
+
+        A hard link provides an atomic no-replace move on normal local file
+        systems.  Cross-device and hard-link-limited file systems fall back to
+        exclusive destination creation followed by a verified copy and source
+        unlink.  Both paths verify source identity before removing it.
+        """
+
+        if self._path_entry_exists(destination):
+            raise FileExistsError(f"destination already exists: {destination}")
+
+        try:
+            os.link(source, destination, follow_symlinks=False)
+        except FileExistsError:
+            raise FileExistsError(f"destination already exists: {destination}")
+        except (NotImplementedError, OSError) as link_error:
+            if isinstance(link_error, OSError) and link_error.errno == errno.EEXIST:
+                raise FileExistsError(f"destination already exists: {destination}")
+            self._copy_without_overwrite(
+                source,
+                destination,
+                expected_source_stat,
+                require_archive=require_archive,
+            )
+            return
+
+        # Roll back only the hard link to the source identity we intended to
+        # move.  Capturing the destination path after linking would let a
+        # concurrent remove-and-replace race trick cleanup into deleting the
+        # replacement instead.
+        destination_stat = expected_source_stat
+        try:
+            current_source_stat = self._require_regular_source(source)
+            if self._file_identity(current_source_stat) != self._file_identity(
+                expected_source_stat
+            ):
+                raise OSError(f"source changed before it could be moved: {source}")
+            current_destination_stat = destination.lstat()
+            if (
+                current_destination_stat.st_dev,
+                current_destination_stat.st_ino,
+            ) != (current_source_stat.st_dev, current_source_stat.st_ino):
+                raise OSError(f"destination identity changed during move: {destination}")
+            if require_archive:
+                self._ensure_within_archive(destination)
+            source.unlink()
+        except Exception:
+            self._unlink_if_identity_matches(destination, destination_stat)
+            raise
+
+    def _copy_without_overwrite(
+        self,
+        source: Path,
+        destination: Path,
+        expected_source_stat: os.stat_result,
+        *,
+        require_archive: bool,
+    ) -> None:
+        """Cross-device no-overwrite fallback with rollback on partial copies."""
+
+        destination_stat = None
+        try:
+            current_source_stat = self._require_regular_source(source)
+            if self._file_identity(current_source_stat) != self._file_identity(
+                expected_source_stat
+            ):
+                raise OSError(f"source changed before it could be copied: {source}")
+
+            with source.open("rb") as source_file:
+                opened_source_stat = os.fstat(source_file.fileno())
+                if self._file_identity(opened_source_stat) != self._file_identity(
+                    expected_source_stat
+                ):
+                    raise OSError(f"source changed while it was opened: {source}")
+                with destination.open("xb") as destination_file:
+                    destination_stat = os.fstat(destination_file.fileno())
+                    shutil.copyfileobj(source_file, destination_file, 1024 * 1024)
+                    after_copy_stat = os.fstat(source_file.fileno())
+                    if self._file_identity(after_copy_stat) != self._file_identity(
+                        expected_source_stat
+                    ):
+                        raise OSError(f"source changed while it was copied: {source}")
+                    destination_file.flush()
+                    os.fsync(destination_file.fileno())
+
+            current_destination_stat = destination.lstat()
+            if (current_destination_stat.st_dev, current_destination_stat.st_ino) != (
+                destination_stat.st_dev,
+                destination_stat.st_ino,
+            ):
+                raise OSError(f"destination identity changed during copy: {destination}")
+            shutil.copystat(source, destination, follow_symlinks=False)
+            current_source_stat = self._require_regular_source(source)
+            if self._file_identity(current_source_stat) != self._file_identity(
+                expected_source_stat
+            ):
+                raise OSError(f"source changed before copy completion: {source}")
+            current_destination_stat = destination.lstat()
+            if (current_destination_stat.st_dev, current_destination_stat.st_ino) != (
+                destination_stat.st_dev,
+                destination_stat.st_ino,
+            ):
+                raise OSError(f"destination identity changed during copy: {destination}")
+            if require_archive:
+                self._ensure_within_archive(destination)
+            source.unlink()
+        except Exception:
+            if destination_stat is not None:
+                self._unlink_if_identity_matches(destination, destination_stat)
+            raise
+
+    @classmethod
+    def _unlink_if_identity_matches(
+        cls, path: Path, expected_stat: os.stat_result
+    ) -> None:
+        """Best-effort rollback that will not unlink a replaced destination."""
+
+        try:
+            current = path.lstat()
+            if (current.st_dev, current.st_ino) == (
+                expected_stat.st_dev,
+                expected_stat.st_ino,
+            ):
+                path.unlink()
+        except OSError:
+            logger.error("Could not roll back incomplete destination: %s", path)
+
     @classmethod
     def _safe_filename(cls, suggested_name: Any, original_name: str) -> str:
         original = cls._safe_component(original_name, fallback="file")
@@ -252,6 +446,11 @@ class FileOrganizer:
         if original_suffix and not candidate.lower().endswith(original_suffix.lower()):
             candidate_stem = Path(candidate).stem or Path(original).stem or "file"
             candidate = f"{candidate_stem}{original_suffix}"
+        if original_suffix:
+            candidate_stem = candidate[: -len(original_suffix)]
+            available_stem_length = max(1, 240 - len(original_suffix))
+            candidate_stem = candidate_stem[:available_stem_length].rstrip(" ._")
+            return f"{candidate_stem or 'file'}{original_suffix}"
         return candidate[:240] or original
 
     @staticmethod
@@ -285,39 +484,58 @@ class FileOrganizer:
             str(second.resolve(strict=False))
         )
 
-    @staticmethod
-    def _handle_name_conflict(path: Path) -> Path:
-        if not path.exists():
+    @classmethod
+    def _handle_name_conflict(
+        cls,
+        path: Path,
+        *,
+        source_path: Path | None = None,
+        sidecar_required: bool = False,
+    ) -> Path:
+        def candidate_is_available(candidate: Path) -> bool:
+            destination_available = not cls._path_entry_exists(candidate) or (
+                source_path is not None and cls._same_path(candidate, source_path)
+            )
+            sidecar_available = not sidecar_required or not cls._path_entry_exists(
+                cls._metadata_path(candidate)
+            )
+            return destination_available and sidecar_available
+
+        if candidate_is_available(path):
             return path
 
         suffix = "".join(path.suffixes)
         stem = path.name[: -len(suffix)] if suffix else path.name
         for counter in range(1, 100_000):
             candidate = path.with_name(f"{stem}_{counter}{suffix}")
-            if not candidate.exists():
+            if candidate_is_available(candidate):
                 return candidate
         raise FileExistsError(f"could not find an available name for {path.name}")
 
+    @staticmethod
+    def _metadata_path(file_path: Path) -> Path:
+        return file_path.with_name(f"{file_path.name}.watchdock.json")
+
     def _apply_tags(self, file_path: Path, tags: Iterable[str]) -> None:
-        metadata_path = file_path.with_name(f"{file_path.name}.watchdock.json")
+        metadata_path = self._metadata_path(file_path)
         metadata = {
             "tags": list(tags),
             "tagged_at": self._now().isoformat(timespec="seconds"),
             "file": file_path.name,
         }
 
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=str(metadata_path.parent),
-            prefix=f".{metadata_path.name}.",
-            suffix=".tmp",
+        descriptor = os.open(
+            metadata_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+            0o600,
         )
+        created_stat = os.fstat(descriptor)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as output:
                 json.dump(metadata, output, indent=2, ensure_ascii=False)
                 output.write("\n")
                 output.flush()
                 os.fsync(output.fileno())
-            os.replace(temporary_name, metadata_path)
-        finally:
-            if os.path.exists(temporary_name):
-                os.unlink(temporary_name)
+        except Exception:
+            self._unlink_if_identity_matches(metadata_path, created_stat)
+            raise

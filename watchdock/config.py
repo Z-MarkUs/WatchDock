@@ -154,7 +154,7 @@ class WatchDockConfig:
     archive_config: ArchiveConfig
     log_level: str = "INFO"
     check_interval: float = 1.0
-    mode: str = "auto"
+    mode: str = "hitl"
 
     def __post_init__(self) -> None:
         self.log_level = self.log_level.strip().upper()

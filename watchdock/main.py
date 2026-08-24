@@ -25,10 +25,61 @@ from watchdock.config import WatchDockConfig
 from watchdock.file_organizer import FileOrganizer
 from watchdock.logging_utils import configure_logging, prepare_console
 from watchdock.paths import default_config_path
-from watchdock.pending_actions import PendingAction, PendingActionsQueue
+from watchdock.pending_actions import (
+    PendingAction,
+    PendingActionsQueue,
+    capture_source_fingerprint,
+)
 from watchdock.watcher import FileWatcher
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_STALE_PROCESSING_SECONDS = 24 * 60 * 60
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    """Return whether two absolute paths have a containment relationship."""
+
+    try:
+        return os.path.commonpath(
+            (os.path.normcase(str(path)), os.path.normcase(str(root)))
+        ) == os.path.normcase(str(root))
+    except ValueError:
+        return False
+
+
+def _validated_watched_source(config: WatchDockConfig, file_path: str) -> str:
+    """Reject event paths that lexically or canonically escape watch roots."""
+
+    source = Path(file_path).expanduser().absolute()
+    resolved_source = source.resolve(strict=True)
+    for folder in config.watched_folders:
+        if not folder.enabled:
+            continue
+        lexical_root = Path(folder.path).expanduser().absolute()
+        try:
+            resolved_root = lexical_root.resolve(strict=True)
+        except FileNotFoundError:
+            continue
+        if _path_is_within(source, lexical_root) and _path_is_within(
+            resolved_source, resolved_root
+        ):
+            return str(source)
+    raise ValueError(f"file resolves outside configured watched folders: {source}")
+
+
+def _same_fingerprint(first: Dict[str, Any], second: Dict[str, Any]) -> bool:
+    return (
+        first.get("device"),
+        first.get("inode"),
+        first.get("size"),
+        first.get("mtime_ns"),
+    ) == (
+        second.get("device"),
+        second.get("inode"),
+        second.get("size"),
+        second.get("mtime_ns"),
+    )
 
 
 class WatchDock:
@@ -42,6 +93,7 @@ class WatchDock:
         ai_processor: Optional[AIProcessor] = None,
         file_organizer: Optional[FileOrganizer] = None,
         pending_queue: Optional[PendingActionsQueue] = None,
+        stale_processing_seconds: float = DEFAULT_STALE_PROCESSING_SECONDS,
     ) -> None:
         config.validate()
         self.config = config
@@ -54,34 +106,53 @@ class WatchDock:
         self.pending_queue = pending_queue or PendingActionsQueue(
             db_path=self.state_dir / "pending_actions.sqlite3"
         )
+        if stale_processing_seconds < 0:
+            raise ValueError("stale_processing_seconds cannot be negative")
+        self.stale_processing_seconds = float(stale_processing_seconds)
         self.watcher: Optional[FileWatcher] = None
         self.running = False
 
     def process_file(self, file_path: str) -> None:
         """Analyze one file and either queue or safely execute its action."""
 
-        if self.file_organizer.is_managed_path(file_path):
+        source = _validated_watched_source(self.config, file_path)
+        if self.file_organizer.is_managed_path(source):
             logger.debug("Ignoring file already managed by archive: %s", file_path)
             return
 
-        logger.info("Analyzing file: %s", file_path)
-        analysis = self.ai_processor.analyze_file(file_path)
-        proposal = self.file_organizer.get_proposed_action(file_path, analysis)
+        logger.info("Analyzing file: %s", source)
+        before_analysis = capture_source_fingerprint(source)
+        analysis = self.ai_processor.analyze_file(source)
+        source = _validated_watched_source(self.config, source)
+        after_analysis = capture_source_fingerprint(source)
+        if not _same_fingerprint(before_analysis, after_analysis):
+            raise RuntimeError(f"file changed while it was being analyzed: {source}")
+        proposal = self.file_organizer.get_proposed_action(source, analysis)
         needs_review = self.config.mode == "hitl" or bool(
             analysis.get("requires_review", False)
         )
 
         if needs_review:
-            action = self.pending_queue.add(file_path, analysis, proposal)
+            source = _validated_watched_source(self.config, source)
+            action = self.pending_queue.add(
+                source,
+                analysis,
+                proposal,
+                source_fingerprint=after_analysis,
+            )
             if self.config.mode == "auto":
                 logger.warning(
                     "Provider result requires review; source was not moved: %s",
-                    file_path,
+                    source,
                 )
             self._notify_pending_action(action)
             return
 
-        result = self.file_organizer.organize_file(file_path, analysis)
+        source = _validated_watched_source(self.config, source)
+        before_organize = capture_source_fingerprint(source)
+        if not _same_fingerprint(after_analysis, before_organize):
+            raise RuntimeError(f"file changed after it was analyzed: {source}")
+        result = self.file_organizer.organize_file(source, analysis)
         if result.get("error"):
             raise RuntimeError(str(result["error"]))
         logger.info("Organization result: %s", result)
@@ -127,6 +198,14 @@ class WatchDock:
 
         if self.running:
             return
+        recovered = self.pending_queue.fail_stale_processing(
+            self.stale_processing_seconds
+        )
+        if recovered:
+            logger.warning(
+                "Marked %s stale processing action(s) failed for reconciliation",
+                len(recovered),
+            )
         self.watcher = FileWatcher(
             self.config.watched_folders,
             self.process_file,
@@ -206,7 +285,14 @@ def cmd_update(_args: argparse.Namespace) -> int:
 
     print(f"Updating WatchDock {__version__} -> {latest_version}")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--upgrade", "watchdock"],
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            f"watchdock=={latest_version}",
+        ],
         check=False,
     )
     if result.returncode:
@@ -359,8 +445,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if provider in {"openai", "anthropic"}:
         module_name = provider
         if importlib.util.find_spec(module_name) is None:
+            level = "ERROR" if config.mode == "auto" else "WARN"
             checks.append(
-                ("ERROR", "provider package", f"install WatchDock[{provider}]")
+                (
+                    level,
+                    "provider package",
+                    f"install WatchDock[{provider}] (review-only rules fallback)",
+                )
             )
         else:
             checks.append(("OK", "provider package", module_name))
@@ -436,7 +527,13 @@ def _execute_claimed_action(
     if result.get("error"):
         queue.fail(action.action_id, str(result["error"]))
         return False, result
-    queue.complete(action.action_id)
+    completed = queue.complete(action.action_id)
+    if completed is None:
+        error = (
+            "filesystem action completed but the processing claim changed; "
+            "manual queue reconciliation is required"
+        )
+        return False, {**result, "error": error}
     return True, result
 
 
@@ -453,7 +550,9 @@ def cmd_approve(args: argparse.Namespace) -> int:
 
     success, result = _execute_claimed_action(config, queue, action)
     if not success:
-        print(f"[ERROR] Action retained as failed: {result['error']}")
+        current = queue.get_by_id(action.action_id)
+        status = current.status if current else "missing"
+        print(f"[ERROR] Action was not completed cleanly ({status}): {result['error']}")
         return 1
     print(f"[OK] Completed action: {action.action_id}")
     print(f"  Destination: {result['new_path']}")
@@ -478,6 +577,20 @@ def cmd_retry(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_recover_stale(args: argparse.Namespace) -> int:
+    """Fail expired claims so their uncertain outcome can be reconciled."""
+
+    recovered = _queue_for_args(args).fail_stale_processing(args.older_than)
+    if not recovered:
+        print("No stale processing actions found.")
+        return 0
+    print(f"Recovered stale processing actions ({len(recovered)}):")
+    for action in recovered:
+        print(f"  {action.action_id}: {action.file_path}")
+    print("Review each failed action before retrying; execution may have occurred.")
+    return 0
+
+
 def cmd_process(args: argparse.Namespace) -> int:
     config = _load_existing_config(args)
     state_dir = _state_dir(args)
@@ -485,8 +598,13 @@ def cmd_process(args: argparse.Namespace) -> int:
         config.ai_config, examples_path=state_dir / "few_shot_examples.json"
     )
     organizer = FileOrganizer(config.archive_config)
-    source = str(Path(args.file).expanduser().resolve())
+    source = str(Path(args.file).expanduser().absolute())
+    before_analysis = capture_source_fingerprint(source)
     analysis = processor.analyze_file(source)
+    after_analysis = capture_source_fingerprint(source)
+    if not _same_fingerprint(before_analysis, after_analysis):
+        print(f"[ERROR] File changed while it was being analyzed: {source}")
+        return 1
     proposal = organizer.get_proposed_action(source, analysis)
 
     print(
@@ -633,6 +751,19 @@ def build_parser() -> argparse.ArgumentParser:
     retry_parser = subparsers.add_parser("retry", help="retry a failed review action")
     retry_parser.add_argument("action_id")
     retry_parser.set_defaults(func=cmd_retry)
+
+    recover_parser = subparsers.add_parser(
+        "recover-stale",
+        help="mark expired processing claims failed for manual reconciliation",
+    )
+    recover_parser.add_argument(
+        "--older-than",
+        type=float,
+        default=DEFAULT_STALE_PROCESSING_SECONDS,
+        metavar="SECONDS",
+        help=f"claim age threshold (default: {DEFAULT_STALE_PROCESSING_SECONDS})",
+    )
+    recover_parser.set_defaults(func=cmd_recover_stale)
 
     parser.set_defaults(func=_cmd_help, help_parser=parser)
     return parser

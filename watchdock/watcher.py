@@ -33,9 +33,21 @@ _METADATA_SUFFIXES = (".watchdock_meta.json", ".watchdock.json")
 
 
 def _normalise_path(path: os.PathLike) -> str:
-    """Return a stable absolute path without requiring the target to exist."""
+    """Return a stable lexical absolute path without following links.
 
-    return os.path.realpath(os.path.abspath(os.path.expanduser(os.fspath(path))))
+    Event paths must retain the directory entry that watchdog observed.  Using
+    ``realpath`` here would turn a symlink inside a watched directory into its
+    target and could make the callback process a file outside the configured
+    watch root.
+    """
+
+    return os.path.normpath(os.path.abspath(os.path.expanduser(os.fspath(path))))
+
+
+def _resolved_path(path: os.PathLike) -> str:
+    """Return a canonical path for containment checks only."""
+
+    return os.path.realpath(_normalise_path(path))
 
 
 def _path_key(path: os.PathLike) -> str:
@@ -87,7 +99,12 @@ def _matches_extensions(path: os.PathLike, extensions: Optional[Set[str]]) -> bo
 
 def _is_excluded(path: os.PathLike, excluded_roots: Sequence[str]) -> bool:
     normalised = _normalise_path(path)
-    return any(_is_within(normalised, root) for root in excluded_roots)
+    resolved = _resolved_path(path)
+    return any(
+        _is_within(normalised, root)
+        or _is_within(resolved, _resolved_path(root))
+        for root in excluded_roots
+    )
 
 
 class WatchDockHandler(FileSystemEventHandler):
@@ -231,6 +248,7 @@ class FileWatcher:
         self._schedule_heap: List[Tuple[float, int, str, int, int]] = []
         self._sequence = 0
         self._token_sequence = 0
+        self._watched_roots: Tuple[str, ...] = ()
 
     @property
     def processed_files(self) -> Set[str]:
@@ -254,6 +272,7 @@ class FileWatcher:
 
             observer = self._observer_factory()
             handlers: List[WatchDockHandler] = []
+            watched_roots: List[str] = []
 
             for folder_config in self.watched_folders:
                 if not getattr(folder_config, "enabled", True):
@@ -288,6 +307,7 @@ class FileWatcher:
                     continue
 
                 handlers.append(handler)
+                watched_roots.append(_resolved_path(folder_path))
                 logger.info(
                     "Watching folder: %s (recursive: %s)",
                     folder_path,
@@ -310,6 +330,7 @@ class FileWatcher:
             self.handlers = handlers
             self._stop_event = stop_event
             self._worker = worker
+            self._watched_roots = tuple(watched_roots)
             self._running = True
             worker.start()
 
@@ -325,6 +346,7 @@ class FileWatcher:
                 self.handlers = []
                 self._worker = None
                 self._stop_event = None
+                self._watched_roots = ()
                 raise
 
             logger.info("File watcher started")
@@ -369,6 +391,7 @@ class FileWatcher:
             self.handlers = []
             self._worker = None
             self._stop_event = None
+            self._watched_roots = ()
             self._stopping = False
         logger.info("File watcher stopped")
 
@@ -589,23 +612,36 @@ class FileWatcher:
             logger.info("Processed stable file: %s", path)
 
     def _stat_signature(self, path: str) -> FileSignature:
-        """Return a change signature after confirming the file is readable."""
+        """Return a signature for an in-scope, non-linked regular file."""
 
         path_obj = Path(path)
-        file_stat = path_obj.stat()
+        file_stat = path_obj.lstat()
         if not stat_module.S_ISREG(file_stat.st_mode):
             raise OSError(f"Not a regular file: {path}")
 
+        resolved = _resolved_path(path_obj)
+        if not self._watched_roots or not any(
+            _is_within(resolved, root) for root in self._watched_roots
+        ):
+            raise OSError(f"File resolves outside configured watched folders: {path}")
+
         # Opening catches common Windows sharing/permission failures without
-        # reading file content or holding the file open across a callback.
-        with path_obj.open("rb"):
-            pass
+        # reading file content or holding the file open across a callback.  The
+        # identity check also catches a final-component swap between lstat and
+        # open (including a swap to a symlink).
+        with path_obj.open("rb") as source_file:
+            opened_stat = os.fstat(source_file.fileno())
+        if not stat_module.S_ISREG(opened_stat.st_mode) or (
+            file_stat.st_dev,
+            file_stat.st_ino,
+        ) != (opened_stat.st_dev, opened_stat.st_ino):
+            raise OSError(f"File changed identity while being opened: {path}")
 
         return (
-            file_stat.st_size,
-            file_stat.st_mtime_ns,
-            getattr(file_stat, "st_ctime_ns", 0),
-            getattr(file_stat, "st_ino", 0),
+            opened_stat.st_size,
+            opened_stat.st_mtime_ns,
+            getattr(opened_stat, "st_ctime_ns", 0),
+            getattr(opened_stat, "st_ino", 0),
         )
 
     def _retry_candidate(

@@ -1,4 +1,7 @@
+import errno
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -183,3 +186,192 @@ def test_metadata_failure_is_a_warning_not_false_success(tmp_path, monkeypatch):
 def test_requires_archive_config(tmp_path):
     with pytest.raises(TypeError, match="ArchiveConfig"):
         FileOrganizer(WatchDockConfig.default())
+
+
+def test_symlink_source_is_rejected_without_moving_target(tmp_path):
+    target = tmp_path / "outside.txt"
+    target.write_text("keep me", encoding="utf-8")
+    link = tmp_path / "inbox.txt"
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"symlink creation is unavailable: {exc}")
+
+    result = organizer(tmp_path).organize_file(
+        str(link), {"category": "Documents", "suggested_name": "moved.txt"}
+    )
+
+    assert "regular file" in result["error"]
+    assert link.is_symlink()
+    assert target.read_text(encoding="utf-8") == "keep me"
+
+
+def test_sidecar_collision_selects_a_new_auto_destination(tmp_path):
+    source = tmp_path / "report.txt"
+    source.write_text("new report", encoding="utf-8")
+    instance = organizer(tmp_path)
+    first_destination = (
+        tmp_path / "archive" / "2026-08" / "Documents" / "report.txt"
+    )
+    occupied_sidecar = first_destination.with_name("report.txt.watchdock.json")
+    occupied_sidecar.parent.mkdir(parents=True)
+    occupied_sidecar.write_text("user-owned", encoding="utf-8")
+
+    result = instance.organize_file(
+        str(source),
+        {
+            "category": "Documents",
+            "suggested_name": "report.txt",
+            "tags": ["report"],
+        },
+    )
+
+    assert result["error"] is None
+    assert Path(result["new_path"]).name == "report_1.txt"
+    assert occupied_sidecar.read_text(encoding="utf-8") == "user-owned"
+    assert Path(f"{result['new_path']}.watchdock.json").exists()
+
+
+def test_reviewed_action_fails_before_move_when_sidecar_is_occupied(tmp_path):
+    source = tmp_path / "inbox" / "draft.txt"
+    source.parent.mkdir()
+    source.write_text("draft", encoding="utf-8")
+    instance = organizer(tmp_path)
+    action = instance.get_proposed_action(
+        str(source),
+        {
+            "category": "Documents",
+            "suggested_name": "final.txt",
+            "tags": [],
+        },
+    )
+    sidecar = Path(f"{action['to']}.watchdock.json")
+    sidecar.parent.mkdir(parents=True)
+    sidecar.write_text("do not replace", encoding="utf-8")
+
+    result = instance.execute_proposed_action(action)
+
+    assert "metadata destination already exists" in result["error"]
+    assert source.read_text(encoding="utf-8") == "draft"
+    assert sidecar.read_text(encoding="utf-8") == "do not replace"
+    assert not Path(action["to"]).exists()
+
+
+def test_sidecar_creation_is_exclusive(tmp_path):
+    source = tmp_path / "file.txt"
+    source.write_text("file", encoding="utf-8")
+    sidecar = Path(f"{source}.watchdock.json")
+    sidecar.write_text("pre-existing", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        organizer(tmp_path)._apply_tags(source, ["new"])
+
+    assert sidecar.read_text(encoding="utf-8") == "pre-existing"
+
+
+def test_rollback_never_unlinks_a_replaced_destination(tmp_path):
+    destination = tmp_path / "destination.txt"
+    destination.write_text("created by WatchDock", encoding="utf-8")
+    created_stat = destination.lstat()
+    destination.unlink()
+    destination.write_text("concurrent replacement", encoding="utf-8")
+
+    FileOrganizer._unlink_if_identity_matches(destination, created_stat)
+
+    assert destination.read_text(encoding="utf-8") == "concurrent replacement"
+
+
+def test_long_generated_name_is_truncated_without_losing_original_suffix(tmp_path):
+    instance = organizer(tmp_path)
+
+    safe_name = instance._safe_filename("x" * 400, "report.final.pdf")
+
+    assert len(safe_name) <= 240
+    assert safe_name.endswith(".final.pdf")
+
+
+def test_cross_device_move_uses_exclusive_verified_copy(tmp_path, monkeypatch):
+    source = tmp_path / "source.txt"
+    source.write_text("cross-device content", encoding="utf-8")
+    destination = tmp_path / "archive" / "destination.txt"
+    destination.parent.mkdir()
+    instance = organizer(tmp_path)
+
+    def cross_device_link(*_args, **_kwargs):
+        raise OSError(errno.EXDEV, "cross-device link")
+
+    monkeypatch.setattr("watchdock.file_organizer.os.link", cross_device_link)
+    result = instance.execute_proposed_action(
+        {
+            "action_type": "move",
+            "from": str(source),
+            "to": str(destination),
+            "tags": [],
+        }
+    )
+
+    assert result["error"] is None
+    assert result["moved"] is True
+    assert not source.exists()
+    assert destination.read_text(encoding="utf-8") == "cross-device content"
+
+
+def test_concurrent_reviewed_moves_never_overwrite_same_destination(
+    tmp_path, monkeypatch
+):
+    first_source = tmp_path / "first.txt"
+    second_source = tmp_path / "second.txt"
+    first_source.write_text("first", encoding="utf-8")
+    second_source.write_text("second", encoding="utf-8")
+    destination = tmp_path / "archive" / "same.txt"
+    destination.parent.mkdir(parents=True)
+    first = organizer(tmp_path)
+    second = organizer(tmp_path)
+    barrier = threading.Barrier(2)
+
+    first_move = first._move_without_overwrite
+    second_move = second._move_without_overwrite
+
+    def synchronized(move):
+        def run(*args, **kwargs):
+            barrier.wait(timeout=2)
+            return move(*args, **kwargs)
+
+        return run
+
+    monkeypatch.setattr(first, "_move_without_overwrite", synchronized(first_move))
+    monkeypatch.setattr(second, "_move_without_overwrite", synchronized(second_move))
+    actions = [
+        {
+            "action_type": "move",
+            "from": str(first_source),
+            "to": str(destination),
+            "tags": [],
+        },
+        {
+            "action_type": "move",
+            "from": str(second_source),
+            "to": str(destination),
+            "tags": [],
+        },
+    ]
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda pair: pair[0].execute_proposed_action(pair[1]),
+                [(first, actions[0]), (second, actions[1])],
+            )
+        )
+
+    assert sum(result["error"] is None for result in results) == 1
+    assert sum(result["error"] is not None for result in results) == 1
+    remaining_contents = [
+        path.read_text(encoding="utf-8")
+        for path in (first_source, second_source)
+        if path.exists()
+    ]
+    assert {destination.read_text(encoding="utf-8"), *remaining_contents} == {
+        "first",
+        "second",
+    }

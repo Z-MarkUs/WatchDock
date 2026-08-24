@@ -30,6 +30,16 @@ def test_default_is_review_first_and_needs_no_inline_key():
     assert config.ai_config.model == "gpt-5.6-luna"
 
 
+def test_direct_configuration_constructor_is_review_first(tmp_path):
+    config = WatchDockConfig(
+        watched_folders=[WatchedFolder(str(tmp_path / "inbox"))],
+        ai_config=AIConfig(),
+        archive_config=ArchiveConfig(str(tmp_path / "archive")),
+    )
+
+    assert config.mode == "hitl"
+
+
 def test_watched_extensions_are_normalized_and_deduplicated():
     folder = WatchedFolder(".", file_extensions=["PDF", ".txt", "pdf", ""])
 

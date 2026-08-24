@@ -64,7 +64,7 @@ def _legacy_status(status_value: Any) -> str:
 def capture_source_fingerprint(
     file_path: Union[str, os.PathLike[str]], include_hash: bool = False
 ) -> Dict[str, Any]:
-    """Capture source size/mtime and, optionally, SHA-256.
+    """Capture source identity, size/mtime and, optionally, SHA-256.
 
     The pre/post stat check prevents recording a digest for a file that changed
     while it was read. New actions require a regular source file; legacy imports
@@ -72,32 +72,43 @@ def capture_source_fingerprint(
     """
 
     source = Path(file_path)
-    before = source.stat()
+    before = source.lstat()
     if not stat.S_ISREG(before.st_mode):
         raise ValueError("Pending actions require a regular source file")
 
     fingerprint: Dict[str, Any] = {
+        "device": before.st_dev,
+        "inode": before.st_ino,
         "size": before.st_size,
         "mtime_ns": before.st_mtime_ns,
         "sha256": None,
     }
-    if not include_hash:
-        return fingerprint
-
-    digest = hashlib.sha256()
+    digest = hashlib.sha256() if include_hash else None
     with source.open("rb") as source_file:
-        for block in iter(lambda: source_file.read(1024 * 1024), b""):
-            digest.update(block)
+        opened = os.fstat(source_file.fileno())
+        if not stat.S_ISREG(opened.st_mode) or (
+            before.st_dev,
+            before.st_ino,
+        ) != (opened.st_dev, opened.st_ino):
+            raise SourceChangedError(
+                "Source changed identity while its fingerprint was being captured"
+            )
+        if digest is not None:
+            for block in iter(lambda: source_file.read(1024 * 1024), b""):
+                digest.update(block)
 
-    after = source.stat()
-    if (before.st_size, before.st_mtime_ns) != (
+    after = source.lstat()
+    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+        after.st_dev,
+        after.st_ino,
         after.st_size,
         after.st_mtime_ns,
     ):
         raise SourceChangedError(
             "Source changed while its fingerprint was being captured"
         )
-    fingerprint["sha256"] = digest.hexdigest()
+    if digest is not None:
+        fingerprint["sha256"] = digest.hexdigest()
     return fingerprint
 
 
@@ -549,13 +560,18 @@ class PendingActionsQueue:
     ) -> PendingAction:
         """Persist a proposal and a fingerprint of the source being reviewed."""
 
-        source_path = Path(file_path).expanduser().resolve(strict=True)
+        lexical_source_path = Path(file_path).expanduser().absolute()
         if source_fingerprint is None:
             fingerprint = capture_source_fingerprint(
-                source_path, include_hash=include_source_hash
+                lexical_source_path, include_hash=include_source_hash
             )
         else:
             fingerprint = dict(source_fingerprint)
+
+        # Resolve only after the lstat-based regular-file check above.  Resolving
+        # first would silently turn a symlink proposal into an action against its
+        # external target.
+        source_path = lexical_source_path.resolve(strict=True)
 
         source_size = fingerprint.get("size")
         source_mtime_ns = fingerprint.get("mtime_ns")
@@ -576,7 +592,7 @@ class PendingActionsQueue:
                 raise ValueError("source sha256 must contain 64 hexadecimal chars")
         if source_fingerprint is not None:
             current = capture_source_fingerprint(
-                source_path, include_hash=source_sha256 is not None
+                lexical_source_path, include_hash=source_sha256 is not None
             )
             if (
                 current["size"] != source_size
