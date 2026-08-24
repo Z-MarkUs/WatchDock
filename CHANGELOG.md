@@ -41,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `watchdock version` is local-only; use `watchdock version --check` for the
   networked PyPI check.
 
+### Fixed
+
+- Standalone archives use distinct CLI and GUI filenames so case-insensitive
+  Windows filesystems cannot collapse the two applications into one.
+
 ### Security
 
 - Provider API keys are resolved from WatchDock-specific or standard environment

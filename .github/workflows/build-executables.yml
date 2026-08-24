@@ -26,15 +26,19 @@ jobs:
           - os: ubuntu-24.04
             artifact-suffix: linux-x64
             executable-extension: ""
+            gui-extension: ""
           - os: windows-2025
             artifact-suffix: windows-x64
             executable-extension: .exe
+            gui-extension: .exe
           - os: macos-15
             artifact-suffix: macos-arm64
             executable-extension: ""
+            gui-extension: .app
           - os: macos-15-intel
             artifact-suffix: macos-x64
             executable-extension: ""
+            gui-extension: .app
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
 
@@ -56,18 +60,33 @@ jobs:
 
       - name: Build standalone applications
         run: |
-          python -m PyInstaller --clean --noconfirm --onefile --name "watchdock-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}" watchdock/main.py
-          python -m PyInstaller --clean --noconfirm --onefile --windowed --name "WatchDock-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}" watchdock/gui_main.py
+          python -m PyInstaller --clean --noconfirm --onefile --name "watchdock-cli-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}" watchdock/main.py
+          python -m PyInstaller --clean --noconfirm --onefile --windowed --name "WatchDock-gui-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}" watchdock/gui_main.py
+
+      - name: Verify distinct CLI and GUI applications
+        env:
+          CLI_APPLICATION: dist/watchdock-cli-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}${{ matrix.executable-extension }}
+          GUI_APPLICATION: dist/WatchDock-gui-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}${{ matrix.gui-extension }}
+        shell: bash
+        run: |
+          test -e "${CLI_APPLICATION}"
+          test -e "${GUI_APPLICATION}"
+          test "$(python -c 'import os; from pathlib import Path; print(Path(os.environ["CLI_APPLICATION"]).resolve())')" != "$(python -c 'import os; from pathlib import Path; print(Path(os.environ["GUI_APPLICATION"]).resolve())')"
 
       - name: Smoke test CLI executable
         shell: bash
-        run: ./dist/watchdock-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}${{ matrix.executable-extension }} --help
+        env:
+          CLI_APPLICATION: dist/watchdock-cli-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}${{ matrix.executable-extension }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          "${CLI_APPLICATION}" --help
+          test "$("${CLI_APPLICATION}" version)" = "WatchDock ${RELEASE_VERSION}"
 
       - name: Smoke test Windows GUI executable startup
         if: runner.os == 'Windows'
         shell: pwsh
         env:
-          GUI_EXECUTABLE: dist\WatchDock-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}.exe
+          GUI_EXECUTABLE: dist\WatchDock-gui-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}.exe
           GUI_CONFIG: ${{ runner.temp }}\watchdock-gui-smoke\config.json
         run: |
           $process = Start-Process `
