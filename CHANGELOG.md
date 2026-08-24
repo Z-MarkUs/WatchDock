@@ -5,6 +5,52 @@ All notable changes to WatchDock will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Review-first single-file workflow with dry-run `process`, explicit `--queue`
+  and `--apply` choices, durable action history, `retry`, `doctor`, redacted
+  `config show`, and JSON status output.
+- SQLite-backed pending-action storage with atomic claims, source fingerprints,
+  failure retention, legacy JSON migration, and concurrent CLI/GUI access.
+- Portable `.watchdock.json` tag sidecars and centralized config, queue, examples,
+  and rotating-log paths under `WATCHDOCK_HOME` or `~/.watchdock`.
+- Cross-platform CI for Python 3.10 through 3.14, provider-extra checks,
+  wheel/source-distribution validation, clean-wheel CLI smoke tests, and gated
+  executable builds.
+- Architecture, security/privacy, recovery, and contributor documentation.
+
+### Changed
+
+- The supported Python floor is now 3.10.
+- The default mode is now human-in-the-loop (`hitl`), and monitoring must be
+  started explicitly with `watchdock start` or from the GUI.
+- OpenAI and Anthropic SDKs are optional extras (`openai`, `anthropic`, or `ai`);
+  the base installation retains offline, review-only rules.
+- Provider imports are lazy. Unavailable providers, request failures, and invalid
+  responses now fall back to deterministic low-confidence proposals that cannot
+  be applied automatically.
+- OpenAI analysis uses the Responses API with strict structured output and
+  `store=false`.
+- File monitoring now debounces duplicate events, waits for stable readable
+  files, ignores common partial downloads and tag sidecars, retries transient
+  errors, and excludes the archive from observation.
+- `watchdock version` is local-only; use `watchdock version --check` for the
+  networked PyPI check.
+
+### Security
+
+- Provider API keys are resolved from WatchDock-specific or standard environment
+  variables; inline configuration remains supported only for compatibility and
+  is redacted by `config show`.
+- Configuration rejects watched-folder/archive overlap and duplicate watch paths.
+- Generated destination components are sanitized, original extensions are
+  retained, reviewed destinations are executed exactly, and a changed source or
+  occupied destination fails safely instead of silently changing the action.
+- File previews are limited to supported text types and treated as untrusted
+  prompt data; binary content is not parsed or uploaded as a preview.
+
 ## [0.1.5] - 2026-01-19
 
 ### Fixed
