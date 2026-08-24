@@ -36,6 +36,67 @@ def test_watched_extensions_are_normalized_and_deduplicated():
     assert folder.file_extensions == [".pdf", ".txt"]
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("enabled", "false", "enabled must be a boolean"),
+        ("recursive", 0, "recursive must be a boolean"),
+        ("file_extensions", ".pdf", "file_extensions must be a JSON array"),
+        ("file_extensions", [".pdf", 7], "file_extensions entries must be strings"),
+    ],
+)
+def test_watched_folder_json_types_are_strict(tmp_path, field, value, message):
+    path = tmp_path / "config.json"
+    folder = {"path": str(tmp_path / "inbox"), field: value}
+    path.write_text(json.dumps({"watched_folders": [folder]}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        WatchDockConfig.load(str(path))
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["create_date_folders", "create_category_folders", "move_files"],
+)
+def test_archive_boolean_json_types_are_strict(tmp_path, field):
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "watched_folders": [],
+                "archive_config": {
+                    "base_path": str(tmp_path / "archive"),
+                    field: "false",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=rf"archive_config\.{field} must be a boolean"):
+        WatchDockConfig.load(str(path))
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value", "message"),
+    [
+        ("ai_config", "temperature", True, "temperature must be between"),
+        (None, "check_interval", True, "check_interval must be greater"),
+    ],
+)
+def test_boolean_values_are_not_accepted_as_numbers(tmp_path, section, field, value, message):
+    path = tmp_path / "config.json"
+    payload = {"watched_folders": []}
+    if section:
+        payload[section] = {field: value}
+    else:
+        payload[field] = value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        WatchDockConfig.load(str(path))
+
+
 def test_round_trip_is_utf8_and_atomic(tmp_path):
     config = make_config(
         tmp_path,
@@ -130,9 +191,7 @@ def test_api_key_prefers_explicit_then_environment(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "environment-secret")
 
     assert AIConfig(api_key="explicit-secret").resolved_api_key() == "explicit-secret"
-    assert (
-        AIConfig(api_key="your-api-key-here").resolved_api_key() == "environment-secret"
-    )
+    assert AIConfig(api_key="your-api-key-here").resolved_api_key() == "environment-secret"
 
 
 def test_missing_file_loads_safe_default(tmp_path):

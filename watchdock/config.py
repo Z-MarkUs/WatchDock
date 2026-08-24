@@ -26,10 +26,12 @@ class WatchedFolder:
 
     def __post_init__(self) -> None:
         self.path = str(Path(self.path).expanduser()) if self.path else ""
-        if self.file_extensions is not None:
+        if isinstance(self.file_extensions, list) and all(
+            isinstance(extension, str) for extension in self.file_extensions
+        ):
             normalized = []
             for extension in self.file_extensions:
-                value = str(extension).strip().lower()
+                value = extension.strip().lower()
                 if not value:
                     continue
                 normalized.append(value if value.startswith(".") else f".{value}")
@@ -39,6 +41,22 @@ class WatchedFolder:
         errors = []
         if not self.path.strip():
             errors.append("watched folder path cannot be empty")
+        if type(self.enabled) is not bool:
+            errors.append("enabled must be a boolean")
+        if type(self.recursive) is not bool:
+            errors.append("recursive must be a boolean")
+        if self.file_extensions is not None:
+            if not isinstance(self.file_extensions, list):
+                errors.append("file_extensions must be a JSON array or null")
+            elif not all(isinstance(item, str) for item in self.file_extensions):
+                errors.append("file_extensions entries must be strings")
+            elif any(
+                len(extension) < 2
+                or not extension.startswith(".")
+                or any(separator in extension for separator in ("/", "\\"))
+                for extension in self.file_extensions
+            ):
+                errors.append("file_extensions entries must be filename suffixes")
         return errors
 
 
@@ -82,18 +100,23 @@ class AIConfig:
 
     def validate(self) -> List[str]:
         errors = []
-        if self.provider not in SUPPORTED_AI_PROVIDERS:
+        if not isinstance(self.provider, str) or self.provider not in SUPPORTED_AI_PROVIDERS:
             errors.append(
-                "ai_config.provider must be one of: "
-                + ", ".join(sorted(SUPPORTED_AI_PROVIDERS))
+                "ai_config.provider must be one of: " + ", ".join(sorted(SUPPORTED_AI_PROVIDERS))
             )
-        if not self.model:
+        if not isinstance(self.model, str) or not self.model:
             errors.append("ai_config.model cannot be empty")
-        if not isinstance(self.temperature, (int, float)) or not (
-            0 <= self.temperature <= 2
+        if (
+            isinstance(self.temperature, bool)
+            or not isinstance(self.temperature, (int, float))
+            or not (0 <= self.temperature <= 2)
         ):
             errors.append("ai_config.temperature must be between 0 and 2")
-        if self.provider == "ollama" and self.base_url:
+        if self.api_key is not None and not isinstance(self.api_key, str):
+            errors.append("ai_config.api_key must be a string or null")
+        if self.base_url is not None and not isinstance(self.base_url, str):
+            errors.append("ai_config.base_url must be a string or null")
+        if self.provider == "ollama" and isinstance(self.base_url, str) and self.base_url:
             parsed = urlparse(self.base_url)
             if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                 errors.append("ai_config.base_url must be a valid HTTP(S) URL")
@@ -110,14 +133,16 @@ class ArchiveConfig:
     move_files: bool = True
 
     def __post_init__(self) -> None:
-        self.base_path = (
-            str(Path(self.base_path).expanduser()) if self.base_path else ""
-        )
+        self.base_path = str(Path(self.base_path).expanduser()) if self.base_path else ""
 
     def validate(self) -> List[str]:
+        errors = []
         if not self.base_path.strip():
-            return ["archive_config.base_path cannot be empty"]
-        return []
+            errors.append("archive_config.base_path cannot be empty")
+        for name in ("create_date_folders", "create_category_folders", "move_files"):
+            if type(getattr(self, name)) is not bool:
+                errors.append(f"archive_config.{name} must be a boolean")
+        return errors
 
 
 @dataclass
@@ -171,9 +196,7 @@ class WatchDockConfig:
                 raise ValueError(f"invalid watched_folders entry: {exc}") from exc
 
         ai_data = _merged_section(asdict(defaults.ai_config), data, "ai_config")
-        archive_data = _merged_section(
-            asdict(defaults.archive_config), data, "archive_config"
-        )
+        archive_data = _merged_section(asdict(defaults.archive_config), data, "archive_config")
         try:
             config = cls(
                 watched_folders=watched_folders,
@@ -233,25 +256,30 @@ class WatchDockConfig:
                 if not isinstance(folder, WatchedFolder):
                     errors.append(f"watched_folders[{index}] is invalid")
                     continue
-                errors.extend(
-                    f"watched_folders[{index}]: {error}" for error in folder.validate()
-                )
+                errors.extend(f"watched_folders[{index}]: {error}" for error in folder.validate())
 
-        errors.extend(self.ai_config.validate())
-        errors.extend(self.archive_config.validate())
+        if not isinstance(self.ai_config, AIConfig):
+            errors.append("ai_config is invalid")
+        else:
+            errors.extend(self.ai_config.validate())
+        if not isinstance(self.archive_config, ArchiveConfig):
+            errors.append("archive_config is invalid")
+        else:
+            errors.extend(self.archive_config.validate())
         if self.mode not in SUPPORTED_MODES:
             errors.append("mode must be one of: auto, hitl")
         if self.log_level not in SUPPORTED_LOG_LEVELS:
-            errors.append(
-                "log_level must be one of: " + ", ".join(sorted(SUPPORTED_LOG_LEVELS))
-            )
-        if (
-            not isinstance(self.check_interval, (int, float))
-            or self.check_interval <= 0
+            errors.append("log_level must be one of: " + ", ".join(sorted(SUPPORTED_LOG_LEVELS)))
+        if isinstance(self.check_interval, bool) or (
+            not isinstance(self.check_interval, (int, float)) or self.check_interval <= 0
         ):
             errors.append("check_interval must be greater than 0")
 
-        archive_path = Path(self.archive_config.base_path).resolve(strict=False)
+        archive_path = (
+            Path(self.archive_config.base_path).resolve(strict=False)
+            if isinstance(self.archive_config, ArchiveConfig) and self.archive_config.base_path
+            else None
+        )
         seen_paths = set()
         for index, folder in enumerate(self.watched_folders):
             if not isinstance(folder, WatchedFolder) or not folder.path:
@@ -261,10 +289,12 @@ class WatchDockConfig:
             if normalized in seen_paths:
                 errors.append(f"watched_folders[{index}] duplicates another folder")
             seen_paths.add(normalized)
-            if folder.enabled and _paths_overlap(watched_path, archive_path):
-                errors.append(
-                    f"watched_folders[{index}] overlaps archive_config.base_path"
-                )
+            if (
+                archive_path is not None
+                and folder.enabled is True
+                and _paths_overlap(watched_path, archive_path)
+            ):
+                errors.append(f"watched_folders[{index}] overlaps archive_config.base_path")
 
         if errors:
             raise ValueError("; ".join(errors))
