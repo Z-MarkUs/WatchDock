@@ -4,6 +4,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -279,6 +280,35 @@ def test_rollback_never_unlinks_a_replaced_destination(tmp_path):
     FileOrganizer._unlink_if_identity_matches(destination, created_stat)
 
     assert destination.read_text(encoding="utf-8") == "concurrent replacement"
+
+
+def test_rollback_identity_includes_size_and_mtime():
+    class FakePath:
+        def __init__(self):
+            self.was_unlinked = False
+
+        def lstat(self):
+            return SimpleNamespace(
+                st_dev=10,
+                st_ino=20,
+                st_size=99,
+                st_mtime_ns=40,
+            )
+
+        def unlink(self):
+            self.was_unlinked = True
+
+    expected = SimpleNamespace(
+        st_dev=10,
+        st_ino=20,
+        st_size=30,
+        st_mtime_ns=40,
+    )
+    path = FakePath()
+
+    FileOrganizer._unlink_if_identity_matches(path, expected)
+
+    assert not path.was_unlinked
 
 
 def test_long_generated_name_is_truncated_without_losing_original_suffix(tmp_path):

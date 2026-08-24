@@ -429,10 +429,11 @@ class FileOrganizer:
 
         try:
             current = path.lstat()
-            if (current.st_dev, current.st_ino) == (
-                expected_stat.st_dev,
-                expected_stat.st_ino,
-            ):
+            # POSIX file systems can immediately recycle an inode after an
+            # unlink.  Device/inode alone can therefore describe a different
+            # file that appeared at the same path.  Fail closed unless the
+            # complete captured identity still matches.
+            if cls._file_identity(current) == cls._file_identity(expected_stat):
                 path.unlink()
         except OSError:
             logger.error("Could not roll back incomplete destination: %s", path)
