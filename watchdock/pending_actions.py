@@ -302,7 +302,17 @@ class PendingActionsQueue:
     def _initialize_schema(self) -> None:
         connection = self._connect()
         try:
-            connection.execute("PRAGMA journal_mode = WAL")
+            journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+            if str(journal_mode).lower() != "wal":
+                journal_mode = connection.execute(
+                    "PRAGMA journal_mode = WAL"
+                ).fetchone()[0]
+            if str(journal_mode).lower() != "wal":
+                logger.warning(
+                    "SQLite WAL mode is unavailable for %s; using %s",
+                    self.db_path,
+                    journal_mode,
+                )
             connection.execute("PRAGMA synchronous = FULL")
             connection.executescript("""
                 CREATE TABLE IF NOT EXISTS pending_actions (
