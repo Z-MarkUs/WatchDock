@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_call:
+    outputs:
+      version:
+        description: Validated package version
+        value: ${{ jobs.package.outputs.version }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            python-version: "3.10"
+          - os: ubuntu-24.04
+            python-version: "3.11"
+          - os: ubuntu-24.04
+            python-version: "3.12"
+          - os: ubuntu-24.04
+            python-version: "3.13"
+          - os: ubuntu-24.04
+            python-version: "3.14"
+          - os: windows-2025
+            python-version: "3.10"
+          - os: windows-2025
+            python-version: "3.14"
+          - os: macos-15
+            python-version: "3.12"
+          - os: macos-15-intel
+            python-version: "3.14"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install test environment
+        run: |
+          python -m pip install "pip==26.2.1"
+          python -m pip install --editable ".[dev]"
+
+      - name: Lint for correctness errors
+        run: python -m ruff check watchdock tests
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Smoke test installed CLI entry points
+        working-directory: ${{ runner.temp }}
+        run: |
+          watchdock --help
+          wd --help
+
+  optional-providers:
+    name: Optional AI provider dependencies
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install provider extras
+        run: |
+          python -m pip install "pip==26.2.1"
+          python -m pip install ".[ai]"
+
+      - name: Import provider SDKs
+        run: python -c "import anthropic, openai; print(anthropic.__version__, openai.__version__)"
+
+  package:
+    name: Build and validate distributions
+    needs:
+      - test
+      - optional-providers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install release tooling
+        run: |
+          python -m pip install "pip==26.2.1"
+          python -m pip install ".[release]"
+
+      - name: Read package metadata
+        id: metadata
+        shell: bash
+        run: |
+          version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])')"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate release tag and ancestry
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          test "${GITHUB_REF_NAME}" = "v${{ steps.metadata.outputs.version }}"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
+
+      - name: Build wheel and source distribution
+        run: python -m build
+
+      - name: Validate distribution metadata
+        run: |
+          python -m twine check dist/*
+          check-wheel-contents dist/*.whl
+
+      - name: Install wheel into a clean environment
+        shell: bash
+        run: |
+          smoke_env="${RUNNER_TEMP}/watchdock-wheel-smoke"
+          python -m venv "${smoke_env}"
+          "${smoke_env}/bin/python" -m pip install "pip==26.2.1"
+          "${smoke_env}/bin/python" -m pip install --no-cache-dir dist/*.whl
+          "${smoke_env}/bin/python" -m pip check
+          cd "${RUNNER_TEMP}"
+          "${smoke_env}/bin/watchdock" --help
+          "${smoke_env}/bin/wd" --help
+          "${smoke_env}/bin/python" -c "import importlib.metadata as m; assert m.version('watchdock') == '${{ steps.metadata.outputs.version }}'"
+
+      - name: Upload validated distributions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-distributions
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14

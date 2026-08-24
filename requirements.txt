@@ -1,7 +1,4 @@
-watchdog>=3.0.0
-openai>=1.0.0
-anthropic>=0.18.0
-packaging>=21.0
-# Flask is optional (for web UI alternative)
-# flask>=2.3.0
+# Compatibility installer for source checkouts. Runtime dependency versions
+# and provider extras are defined only in pyproject.toml.
+-e .[ai]
 

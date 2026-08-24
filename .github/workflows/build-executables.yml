@@ -4,69 +4,73 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: executables-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    name: ${{ matrix.artifact-suffix }}
+    needs: validate
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
         include:
-          - os: ubuntu-latest
-            artifact-name: watchdock-linux
-          - os: windows-latest
-            artifact-name: watchdock-windows
-          - os: macos-latest
-            artifact-name: watchdock-macos-arm64
-          - os: macos-13
-            artifact-name: watchdock-macos-intel
-    
+          - os: ubuntu-24.04
+            artifact-suffix: linux-x64
+            executable-extension: ""
+          - os: windows-2025
+            artifact-suffix: windows-x64
+            executable-extension: .exe
+          - os: macos-15
+            artifact-suffix: macos-arm64
+            executable-extension: ""
+          - os: macos-15-intel
+            artifact-suffix: macos-x64
+            executable-extension: ""
     runs-on: ${{ matrix.os }}
-    
+    timeout-minutes: 30
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pyinstaller
-        pip install watchdog openai anthropic
-    
-    - name: Build executable (Linux)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        pyinstaller --name=watchdock-0.1.5-linux --onefile watchdock/main.py
-        pyinstaller --name=WatchDock-0.1.5-linux --windowed --onefile watchdock/gui_main.py
-    
-    - name: Build executable (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        pyinstaller --name=watchdock-0.1.5-windows --onefile watchdock/main.py
-        pyinstaller --name=WatchDock-0.1.5-windows --windowed --onefile watchdock/gui_main.py
-    
-    - name: Build executable (macOS - Apple Silicon)
-      if: matrix.os == 'macos-latest'
-      run: |
-        pyinstaller --name=watchdock-0.1.5-arm64 --onefile watchdock/main.py
-        pyinstaller --name=WatchDock-0.1.5-arm64 --windowed --onefile watchdock/gui_main.py
-    
-    - name: Build executable (macOS - Intel)
-      if: matrix.os == 'macos-13'
-      run: |
-        pyinstaller --name=watchdock-0.1.5-intel --onefile watchdock/main.py
-        pyinstaller --name=WatchDock-0.1.5-intel --windowed --onefile watchdock/gui_main.py
-    
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ matrix.artifact-name }}
-        path: |
-          dist/watchdock*
-          dist/WatchDock*
-        retention-days: 30
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install application and frozen-build tooling
+        run: |
+          python -m pip install "pip==26.2.1"
+          python -m pip install ".[ai]" "pyinstaller==6.22.2"
+
+      - name: Build standalone applications
+        run: |
+          python -m PyInstaller --clean --noconfirm --onefile --name "watchdock-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}" watchdock/main.py
+          python -m PyInstaller --clean --noconfirm --onefile --windowed --name "WatchDock-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}" watchdock/gui_main.py
+
+      - name: Smoke test CLI executable
+        shell: bash
+        run: ./dist/watchdock-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}${{ matrix.executable-extension }} --help
+
+      - name: Upload standalone applications
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: watchdock-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}
+          path: |
+            dist/watchdock-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}*
+            dist/WatchDock-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
 

@@ -2,32 +2,72 @@ name: Publish to PyPI
 
 on:
   release:
-    types: [created]
-  workflow_dispatch:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
 
 jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+
   publish:
-    runs-on: ubuntu-latest
-    
+    name: Publish validated distributions
+    needs: validate
+    if: github.event.release.prerelease == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-    
-    - name: Install build dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install build twine
-    
-    - name: Build package
-      run: python -m build
-    
-    - name: Publish to PyPI
-      env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-      run: twine upload dist/*
+      - name: Download validated distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-distributions
+          path: dist
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install upload client
+        run: |
+          python -m pip install "pip==26.2.1"
+          python -m pip install "twine==7.0.0"
+
+      - name: Refuse an existing PyPI version
+        env:
+          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import urllib.error
+          import urllib.request
+
+          version = os.environ["PACKAGE_VERSION"]
+          url = f"https://pypi.org/pypi/watchdock/{version}/json"
+          try:
+              urllib.request.urlopen(url, timeout=15).close()
+          except urllib.error.HTTPError as error:
+              if error.code == 404:
+                  raise SystemExit(0)
+              raise
+          raise SystemExit(f"watchdock {version} already exists on PyPI")
+          PY
+
+      - name: Recheck downloaded distributions
+        run: python -m twine check dist/*
+
+      # Keep the existing project-scoped token until a PyPI Trusted Publisher
+      # is configured. The workflow deliberately has no arbitrary-ref dispatch.
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: python -m twine upload --non-interactive --disable-progress-bar dist/*
 
