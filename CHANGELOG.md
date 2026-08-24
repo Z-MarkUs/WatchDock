@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-24
+
 ### Added
 
 - Review-first single-file workflow with dry-run `process`, explicit `--queue`
@@ -49,7 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retained, reviewed destinations are executed exactly, and a changed source or
   occupied destination fails safely instead of silently changing the action.
 - Symlink sources and resolved paths outside configured watch roots are rejected;
-  concurrent moves and sidecar creation use no-replace operations.
+  concurrent moves and sidecar creation use no-replace operations, and rollback
+  cleanup verifies the complete captured file identity before unlinking.
 - File previews are limited to supported text types and treated as untrusted
   prompt data; binary content is not parsed or uploaded as a preview.
 

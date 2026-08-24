@@ -433,8 +433,16 @@ class FileOrganizer:
             # unlink.  Device/inode alone can therefore describe a different
             # file that appeared at the same path.  Fail closed unless the
             # complete captured identity still matches.
-            if cls._file_identity(current) == cls._file_identity(expected_stat):
+            if (
+                stat_module.S_ISREG(current.st_mode)
+                and cls._file_identity(current) == cls._file_identity(expected_stat)
+            ):
                 path.unlink()
+            else:
+                logger.warning(
+                    "Skipped rollback because destination identity changed: %s",
+                    path,
+                )
         except OSError:
             logger.error("Could not roll back incomplete destination: %s", path)
 

@@ -1,5 +1,6 @@
 import errno
 import json
+import stat
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -293,6 +294,7 @@ def test_rollback_identity_includes_size_and_mtime():
                 st_ino=20,
                 st_size=99,
                 st_mtime_ns=40,
+                st_mode=stat.S_IFREG | 0o600,
             )
 
         def unlink(self):
@@ -309,6 +311,16 @@ def test_rollback_identity_includes_size_and_mtime():
     FileOrganizer._unlink_if_identity_matches(path, expected)
 
     assert not path.was_unlinked
+
+
+def test_rollback_removes_unchanged_regular_destination(tmp_path):
+    destination = tmp_path / "unchanged.txt"
+    destination.write_text("WatchDock output", encoding="utf-8")
+    created_stat = destination.lstat()
+
+    FileOrganizer._unlink_if_identity_matches(destination, created_stat)
+
+    assert not destination.exists()
 
 
 def test_long_generated_name_is_truncated_without_losing_original_suffix(tmp_path):
