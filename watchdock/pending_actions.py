@@ -549,7 +549,7 @@ class PendingActionsQueue:
 
         return self.get_pending()
 
-    def add(
+    def _prepare_new_action(
         self,
         file_path: str,
         analysis: Mapping[str, Any],
@@ -557,8 +557,8 @@ class PendingActionsQueue:
         *,
         source_fingerprint: Optional[Mapping[str, Any]] = None,
         include_source_hash: bool = False,
-    ) -> PendingAction:
-        """Persist a proposal and a fingerprint of the source being reviewed."""
+    ) -> tuple[PendingAction, str, str]:
+        """Validate and serialize a new action before opening a transaction."""
 
         lexical_source_path = Path(file_path).expanduser().absolute()
         if source_fingerprint is None:
@@ -621,30 +621,141 @@ class PendingActionsQueue:
             created_at=now,
             updated_at=now,
         )
+        return action, analysis_json, proposed_action_json
+
+    def _insert_prepared_action(
+        self,
+        connection: sqlite3.Connection,
+        action: PendingAction,
+        analysis_json: str,
+        proposed_action_json: str,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO pending_actions (
+                action_id, file_path, analysis_json, proposed_action_json,
+                source_size, source_mtime_ns, source_sha256, status,
+                created_at, updated_at, attempt_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, 0)
+            """,
+            (
+                action.action_id,
+                action.file_path,
+                analysis_json,
+                proposed_action_json,
+                action.source_size,
+                action.source_mtime_ns,
+                action.source_sha256,
+                action.created_at,
+                action.updated_at,
+            ),
+        )
+        self._record_event(
+            connection,
+            action.action_id,
+            None,
+            "pending",
+            action.created_at,
+        )
+
+    def add(
+        self,
+        file_path: str,
+        analysis: Mapping[str, Any],
+        proposed_action: Mapping[str, Any],
+        *,
+        source_fingerprint: Optional[Mapping[str, Any]] = None,
+        include_source_hash: bool = False,
+    ) -> PendingAction:
+        """Persist a proposal and a fingerprint of the source being reviewed."""
+
+        action, analysis_json, proposed_action_json = self._prepare_new_action(
+            file_path,
+            analysis,
+            proposed_action,
+            source_fingerprint=source_fingerprint,
+            include_source_hash=include_source_hash,
+        )
         with self._transaction(immediate=True) as connection:
-            connection.execute(
+            self._insert_prepared_action(
+                connection,
+                action,
+                analysis_json,
+                proposed_action_json,
+            )
+        logger.info("Added pending action %s for %s", action.action_id, action.file_path)
+        return action
+
+    def add_or_get_active(
+        self,
+        file_path: str,
+        analysis: Mapping[str, Any],
+        proposed_action: Mapping[str, Any],
+        *,
+        source_fingerprint: Optional[Mapping[str, Any]] = None,
+        include_source_hash: bool = False,
+    ) -> tuple[PendingAction, bool]:
+        """Atomically add a proposal or return matching active work.
+
+        An action is considered the same active proposal when it has the same
+        canonical source path and source fingerprint and is either pending or
+        processing.  The immediate SQLite transaction makes this decision safe
+        across simultaneous CLI, GUI, and agent processes.  ``add`` retains its
+        historical always-insert behavior for backwards compatibility.
+
+        The boolean return value is true only when this call inserted the row.
+        """
+
+        action, analysis_json, proposed_action_json = self._prepare_new_action(
+            file_path,
+            analysis,
+            proposed_action,
+            source_fingerprint=source_fingerprint,
+            include_source_hash=include_source_hash,
+        )
+        with self._transaction(immediate=True) as connection:
+            row = connection.execute(
                 """
-                INSERT INTO pending_actions (
-                    action_id, file_path, analysis_json, proposed_action_json,
-                    source_size, source_mtime_ns, source_sha256, status,
-                    created_at, updated_at, attempt_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, 0)
+                SELECT *
+                  FROM pending_actions
+                 WHERE file_path = ?
+                   AND status IN ('pending', 'processing')
+                   AND source_size = ?
+                   AND source_mtime_ns = ?
+                   AND (
+                        source_sha256 IS NULL
+                        OR ? IS NULL
+                        OR source_sha256 = ?
+                   )
+                 ORDER BY created_at, action_id
+                 LIMIT 1
                 """,
                 (
-                    action.action_id,
                     action.file_path,
-                    analysis_json,
-                    proposed_action_json,
                     action.source_size,
                     action.source_mtime_ns,
                     action.source_sha256,
-                    action.created_at,
-                    action.updated_at,
+                    action.source_sha256,
                 ),
+            ).fetchone()
+            if row is not None:
+                existing = self._row_to_action(row)
+                logger.info(
+                    "Reused active action %s for %s",
+                    existing.action_id,
+                    existing.file_path,
+                )
+                return existing, False
+
+            self._insert_prepared_action(
+                connection,
+                action,
+                analysis_json,
+                proposed_action_json,
             )
-            self._record_event(connection, action.action_id, None, "pending", now)
-        logger.info("Added pending action %s for %s", action.action_id, source_path)
-        return action
+
+        logger.info("Added pending action %s for %s", action.action_id, action.file_path)
+        return action, True
 
     def list_actions(
         self,

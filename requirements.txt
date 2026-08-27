@@ -1,4 +1,4 @@
 # Compatibility installer for source checkouts. Runtime dependency versions
-# and provider extras are defined only in pyproject.toml.
--e .[ai]
+# and optional provider/MCP extras are defined only in pyproject.toml.
+-e .[ai,mcp]
 

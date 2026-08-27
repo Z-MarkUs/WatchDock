@@ -1,0 +1,12 @@
+interface:
+  display_name: "WatchDock Review"
+  short_description: "Inspect and explain queued file actions"
+  default_prompt: "Use $watchdock-review to explain my pending actions without approving or moving files."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "watchdock"
+      description: "Local WatchDock review-first filesystem tools"
+      transport: "stdio"
+policy:
+  allow_implicit_invocation: true

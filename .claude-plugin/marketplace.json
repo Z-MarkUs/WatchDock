@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "watchdock",
+  "owner": {
+    "name": "Hehan Zhao"
+  },
+  "description": "Review-first file organization tools for Claude Code.",
+  "plugins": [
+    {
+      "name": "watchdock-agent",
+      "source": "./integrations/watchdock-agent",
+      "description": "Analyze and queue file-organization proposals while keeping execution under human control.",
+      "version": "0.3.0",
+      "author": {
+        "name": "Hehan Zhao"
+      },
+      "category": "productivity",
+      "tags": [
+        "filesystem",
+        "human-in-the-loop",
+        "mcp"
+      ]
+    }
+  ]
+}

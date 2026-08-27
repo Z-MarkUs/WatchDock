@@ -73,6 +73,74 @@ def test_add_persists_exact_payload_uuid_fingerprint_and_wal(tmp_path):
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
+def test_add_or_get_active_deduplicates_without_changing_add_semantics(tmp_path):
+    source = _source(tmp_path)
+    queue = _queue(tmp_path)
+    analysis = {"category": "Documents"}
+    proposal = {
+        "action_type": "move",
+        "from": str(source),
+        "to": str(tmp_path / "Archive" / "source.txt"),
+    }
+
+    first, first_created = queue.add_or_get_active(
+        str(source), analysis, proposal, include_source_hash=True
+    )
+    duplicate, duplicate_created = queue.add_or_get_active(
+        str(source), analysis, proposal, include_source_hash=True
+    )
+
+    assert first_created is True
+    assert duplicate_created is False
+    assert duplicate.action_id == first.action_id
+    assert len(queue.list_actions()) == 1
+
+    source.write_text("a genuinely new source revision", encoding="utf-8")
+    revised, revised_created = queue.add_or_get_active(
+        str(source), analysis, proposal, include_source_hash=True
+    )
+    assert revised_created is True
+    assert revised.action_id != first.action_id
+    assert len(queue.list_actions()) == 2
+
+    # Existing callers of add() still receive a distinct audit row.
+    independently_added = queue.add(str(source), analysis, proposal)
+    assert independently_added.action_id != first.action_id
+    assert len(queue.list_actions()) == 3
+
+
+def test_add_or_get_active_is_atomic_across_competing_connections(tmp_path):
+    source = _source(tmp_path)
+    db_path = tmp_path / "dedupe.sqlite3"
+    queues = [
+        PendingActionsQueue(db_path, migrate_legacy=False)
+        for _ in range(8)
+    ]
+    barrier = Barrier(len(queues))
+    proposal = {
+        "action_type": "move",
+        "from": str(source),
+        "to": str(tmp_path / "Archive" / "source.txt"),
+    }
+
+    def add_from_connection(index):
+        barrier.wait()
+        action, created = queues[index].add_or_get_active(
+            str(source),
+            {"category": "Documents", "worker": index},
+            proposal,
+            include_source_hash=True,
+        )
+        return action.action_id, created
+
+    with ThreadPoolExecutor(max_workers=len(queues)) as executor:
+        results = list(executor.map(add_from_connection, range(len(queues))))
+
+    assert len({action_id for action_id, _created in results}) == 1
+    assert sum(created for _action_id, created in results) == 1
+    assert len(queues[0].list_actions()) == 1
+
+
 def test_default_paths_honor_watchdock_home_at_construction_time(tmp_path, monkeypatch):
     portable_home = tmp_path / "portable"
     monkeypatch.setenv("WATCHDOCK_HOME", str(portable_home))

@@ -1,0 +1,42 @@
+{
+  "name": "watchdock-agent",
+  "version": "0.3.0",
+  "description": "Human-reviewed filesystem organization for AI coding agents through WatchDock.",
+  "author": {
+    "name": "Hehan Zhao",
+    "url": "https://github.com/Z-MarkUs"
+  },
+  "homepage": "https://github.com/Z-MarkUs/WatchDock#readme",
+  "repository": "https://github.com/Z-MarkUs/WatchDock",
+  "license": "MIT",
+  "keywords": [
+    "watchdock",
+    "agent-skills",
+    "mcp",
+    "filesystem",
+    "human-in-the-loop"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "WatchDock Agent",
+    "shortDescription": "Human-reviewed file organization for AI agents.",
+    "longDescription": "Analyze, queue, review, and diagnose WatchDock file-organization proposals through portable Agent Skills and a local MCP server. Files move only after separate human approval.",
+    "developerName": "Hehan Zhao",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/Z-MarkUs/WatchDock",
+    "privacyPolicyURL": "https://github.com/Z-MarkUs/WatchDock/blob/main/docs/SECURITY.md",
+    "defaultPrompt": [
+      "Analyze this artifact and queue a safe organization proposal.",
+      "Explain my pending WatchDock actions without approving them.",
+      "Diagnose my WatchDock setup and suggest the next check."
+    ],
+    "brandColor": "#4F46E5",
+    "composerIcon": "./assets/watchdock-icon.png",
+    "logo": "./assets/watchdock-icon.png"
+  }
+}

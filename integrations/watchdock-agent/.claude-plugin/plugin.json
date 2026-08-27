@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "watchdock-agent",
+  "displayName": "WatchDock Agent",
+  "version": "0.3.0",
+  "description": "Human-reviewed filesystem organization for AI coding agents through WatchDock.",
+  "author": {
+    "name": "Hehan Zhao",
+    "url": "https://github.com/Z-MarkUs"
+  },
+  "homepage": "https://github.com/Z-MarkUs/WatchDock#readme",
+  "repository": "https://github.com/Z-MarkUs/WatchDock",
+  "license": "MIT",
+  "keywords": [
+    "watchdock",
+    "agent-skills",
+    "mcp",
+    "filesystem",
+    "human-in-the-loop"
+  ]
+}

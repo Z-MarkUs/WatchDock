@@ -31,6 +31,11 @@ def test_ai_provider_sdks_are_optional() -> None:
     assert {"openai", "anthropic"} <= _requirements_for_extra("ai")
 
 
+def test_mcp_sdk_is_optional() -> None:
+    assert "mcp" not in _requirements_for_extra()
+    assert "mcp" in _requirements_for_extra("mcp")
+
+
 def test_console_entry_points_are_declared() -> None:
     scripts = {
         entry_point.name: entry_point.value
@@ -39,6 +44,7 @@ def test_console_entry_points_are_declared() -> None:
     }
     assert scripts["watchdock"] == "watchdock.main:main"
     assert scripts["wd"] == "watchdock.main:main"
+    assert scripts["watchdock-mcp"] == "watchdock.mcp_server:main"
 
 
 def test_runtime_and_distribution_versions_match() -> None:

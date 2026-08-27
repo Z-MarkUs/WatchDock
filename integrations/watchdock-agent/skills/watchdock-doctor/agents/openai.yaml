@@ -1,0 +1,12 @@
+interface:
+  display_name: "WatchDock Doctor"
+  short_description: "Diagnose WatchDock health and setup"
+  default_prompt: "Use $watchdock-doctor to diagnose this WatchDock issue without changing watched files."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "watchdock"
+      description: "Local WatchDock review-first filesystem tools"
+      transport: "stdio"
+policy:
+  allow_implicit_invocation: true

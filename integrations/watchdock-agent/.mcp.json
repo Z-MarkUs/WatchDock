@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "watchdock": {
+      "command": "watchdock-mcp",
+      "args": []
+    }
+  }
+}

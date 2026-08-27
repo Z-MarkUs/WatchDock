@@ -4,15 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "watchdock"
-version = "0.2.0"
-description = "A local, self-hosted file monitoring and organization tool using AI"
+version = "0.3.0"
+description = "A review-first file organizer and safety gateway for people and AI agents"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-    {name = "WatchDock Team"}
+    {name = "Hehan Zhao"}
 ]
-keywords = ["file-organization", "ai", "automation", "file-management", "watchdog"]
+keywords = [
+    "file-organization",
+    "ai",
+    "automation",
+    "file-management",
+    "watchdog",
+    "mcp",
+    "agent-skills",
+    "human-in-the-loop",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: End Users/Desktop",
@@ -43,7 +52,11 @@ ai = [
     "openai>=1.0,<4",
     "anthropic>=0.18,<2",
 ]
+mcp = [
+    "mcp>=2.0,<3",
+]
 dev = [
+    "mcp>=2.0,<3",
     "pytest>=8,<10",
     "pytest-cov>=5,<8",
     "ruff>=0.8,<1",
@@ -63,6 +76,7 @@ Issues = "https://github.com/Z-MarkUs/watchdock/issues"
 [project.scripts]
 watchdock = "watchdock.main:main"
 wd = "watchdock.main:main"
+watchdock-mcp = "watchdock.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["watchdock*"]
