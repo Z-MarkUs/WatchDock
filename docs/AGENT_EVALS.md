@@ -16,9 +16,9 @@ reported at their actual depth rather than inferred from valid manifests.
 | Evidence layer | Current status | Required release evidence |
 | --- | --- | --- |
 | Agent service behavior | Green locally and in public CI | Keep the release-commit workflow green |
-| MCP tool inventory and structured results | Green source, clean-wheel, and real stdio smokes | Repeat in tagged platform builds |
-| Codex marketplace and plugin | Windows live queue flow passed from installed skill through MCP | Repeat the marketplace install from the public tag |
-| Claude marketplace and plugin | Native validation, isolated install, three-skill discovery, and MCP health passed | Model-driven queue requires an authenticated Claude session |
+| MCP tool inventory and structured results | Green source, public-PyPI, downloaded-Windows, and four-platform frozen stdio smokes | Repeat in future tagged platform builds |
+| Codex marketplace and plugin | Public `v0.3.0` Git marketplace resolved to the release commit; Windows live queue flow passed from installed skill through MCP | Repeat for future public tags |
+| Claude marketplace and plugin | Final Git marketplace strict validation, isolated reinstall, three-skill discovery, and public-PyPI MCP health passed | Model-driven queue requires an authenticated Claude session |
 | Human handoff | Codex-queued source was approved separately; exact bytes, destination, sidecar, and completed state verified | Claude model-driven handoff not claimed |
 
 ## Invariants
@@ -100,16 +100,22 @@ The acceptance record must include:
   sidecar.
 
 Run this on Windows, Linux, and macOS for the final release candidate. The 0.3.0
-candidate workflow builds a separate frozen MCP executable and runs the same
-stdio smoke client against it; the claim becomes public only after those
-platform jobs and downloaded release-asset checks pass.
+release workflow built a separate frozen MCP executable and ran the same stdio
+smoke client on Windows x64, Linux x64, macOS Apple Silicon, and macOS Intel.
+Every release ZIP was downloaded and independently checked against both
+`SHA256SUMS.txt` and GitHub's asset digest before publication. A fresh Windows
+environment then installed `watchdock[mcp]==0.3.0` from public PyPI, passed
+`pip check`, and repeated the real stdio smoke. See the
+[tagged build](https://github.com/Z-MarkUs/WatchDock/actions/runs/33098948007)
+and [PyPI publication](https://github.com/Z-MarkUs/WatchDock/actions/runs/33102632611).
 
 ## Codex live acceptance
 
 Use a clean Codex profile or record all pre-existing configuration that might
 affect discovery.
 
-1. Install `watchdock[mcp]` from the candidate wheel.
+1. Install `watchdock[mcp]` from the candidate wheel, then repeat from public
+   PyPI after publication.
 2. Create an isolated WatchDock configuration and watched folder.
 3. Add the tagged marketplace and install the plugin:
 
@@ -138,7 +144,10 @@ the destination was absent. A separate CLI approval then produced the exact
 destination, byte-identical digest, `.watchdock.json` sidecar, and completed
 state. The no-approval policy path was also exercised and correctly created no
 action. The broader negative matrix remains covered by automated regressions,
-not claimed as repeated model-driven calls.
+not claimed as repeated model-driven calls. After publication, the configured
+Codex marketplace was refreshed from public tag `v0.3.0`, resolved to release
+commit `7ba861ce57c3731f1d9e4afbe793424911354aa3`, and reported the `0.3.0`
+plugin installed and enabled.
 
 ## Claude Code live acceptance
 
@@ -157,9 +166,10 @@ Record the Claude Code version, plugin scope, marketplace revision, operating
 system, sanitized transcript, and final artifact hashes.
 
 The 2026-08-28 Windows acceptance used Claude Code `2.1.240` with an isolated
-configuration. Native validation passed for the marketplace and plugin; local
-marketplace installation reported version `0.3.0`; component discovery found
-all three skills and one MCP server; and `claude mcp list` connected successfully.
+configuration. After publication, its Git marketplace was refreshed to release
+commit `7ba861ce57c3731f1d9e4afbe793424911354aa3`; strict native validation and a
+clean plugin reinstall passed. Component discovery found all three skills and
+one MCP server, and `claude mcp list` connected to the public-PyPI installation.
 A model-driven queue was not run because the isolated client was not logged in.
 The project therefore claims Claude-native packaging and MCP connectivity, not
 a Claude model-driven queue/handoff.
@@ -170,8 +180,8 @@ Add one row only after retaining the corresponding evidence:
 
 | Client | Version | OS | Package source | Manifest/skill validation | Queue flow | External approval | Negative cases | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Codex | 0.150.0-alpha.8 | Windows | 0.3.0 source candidate + installed local catalog | Passed: skill loaded and MCP tools called | Passed | Passed: exact bytes, destination, sidecar, completed state | Automated suite; live no-approval path | 2026-08-28 acceptance + public CI |
-| Claude Code | 2.1.240 | Windows | 0.3.0 source candidate + isolated local marketplace | Passed: native validation, 3 skills, connected MCP | Not run: login required | Not claimed | Automated protocol suite | 2026-08-28 structural/connectivity acceptance |
+| Codex | 0.150.0-alpha.8 | Windows | Public `v0.3.0` Git marketplace + public-PyPI MCP | Passed: skill loaded, exact release commit resolved, MCP tools called | Passed | Passed: exact bytes, destination, sidecar, completed state | Automated suite; live no-approval path | 2026-08-28 acceptance + tagged/public CI |
+| Claude Code | 2.1.240 | Windows | Final Git marketplace + public-PyPI MCP in isolated config | Passed: strict native validation, clean reinstall, 3 skills, connected MCP | Not run: login required | Not claimed | Automated protocol suite | 2026-08-28 final structural/connectivity acceptance |
 
 Evidence may be a public CI run, a committed sanitized transcript, screenshots,
 and checksums. Do not link private filenames, credentials, prompts, or home
