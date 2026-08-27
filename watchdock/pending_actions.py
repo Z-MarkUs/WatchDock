@@ -723,8 +723,7 @@ class PendingActionsQueue:
                    AND source_size = ?
                    AND source_mtime_ns = ?
                    AND (
-                        source_sha256 IS NULL
-                        OR ? IS NULL
+                        (source_sha256 IS NULL AND ? IS NULL)
                         OR source_sha256 = ?
                    )
                  ORDER BY created_at, action_id

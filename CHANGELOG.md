@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - Unreleased
+
+### Added
+
+- Optional local `watchdock-mcp` stdio server with eight structured tools for
+  status, diagnostics, dry-run analysis, review queueing, action inspection,
+  rejection, and retry.
+- Constrained agent-service facade that deliberately omits approval and filesystem
+  execution methods while reusing WatchDock's watched-root validation and
+  durable queue.
+- Portable `watchdock-organize`, `watchdock-review`, and `watchdock-doctor`
+  Agent Skills, version-pinnable Codex Git marketplace and plugin metadata, and
+  a Claude Code `watchdock` marketplace entry.
+- Deterministic, versioned agent-plugin archive validation and a 0.3.0 release
+  candidate build for a separate frozen MCP executable on every target platform.
+- SHA-256 fingerprints for agent-queued sources and atomic active-action
+  deduplication for repeated or concurrent requests.
+- Branded project artwork, a showcase-first README, agent setup documentation,
+  an exact MCP tool-effects matrix, and a client evaluation plan.
+
+### Changed
+
+- Project metadata now identifies Hehan Zhao as the author and positions
+  WatchDock as a review-first organizer and constrained agent gateway.
+- MCP support is an optional `mcp` extra; the base CLI, GUI, watcher, and offline
+  rules remain available without the MCP SDK.
+- Agent `list_actions` defaults to pending and failed work while retaining
+  explicit access to other requested lifecycle states.
+- Agent status and action payloads explicitly report that filesystem execution
+  is unavailable through the gateway; mutating tools report their queue or probe
+  side effects.
+- Provider readiness now distinguishes SDK installation, initialized-client
+  state, credentials, and endpoint configuration. Analysis responses distinguish
+  local rules fallback from an attempted provider request.
+- Proposal generation no longer creates the archive directory; only diagnostics
+  and actual execution perform documented archive writes.
+
+### Security
+
+- Agent analysis repeats watched-root and source-identity checks after provider
+  I/O so a replaced source is not queued under stale review context.
+- Agent-queued actions require separate GUI or CLI approval; no MCP tool can
+  approve, move, rename, copy, delete, or overwrite a source file.
+- GUI and CLI approval revalidate the source against the currently enabled
+  watched roots, and hashed agent requests cannot deduplicate against legacy
+  actions that lack a SHA-256 digest.
+- Few-shot example tags are treated as untrusted input and bounded by type,
+  count, and length before they enter a provider prompt.
+- Documentation now distinguishes the constrained MCP interface from a sandbox,
+  discloses provider/network effects and the doctor write probe, and describes
+  absolute path and lifecycle-history visibility to connected clients.
+
+### Validation status
+
+- Service and MCP regression coverage is included in the repository. Clean
+  installed-wheel protocol checks and live Codex and Claude Code flows remain
+  explicit final release gates and are not claimed complete by manifest
+  presence alone.
+
 ## [0.2.0] - 2026-08-24
 
 ### Added
@@ -117,7 +176,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved layout clarity across tabs
 - Added mode field to config example
 
-## [0.1.0] - 2024-01-XX
+## [0.1.0] - 2025-11-17
 
 ### Added
 - Initial release of WatchDock

@@ -63,7 +63,7 @@ jobs:
           python -m pip install --editable ".[dev]"
 
       - name: Lint for correctness errors
-        run: python -m ruff check watchdock tests
+        run: python -m ruff check watchdock scripts tests
 
       - name: Run tests
         run: python -m pytest
@@ -73,6 +73,7 @@ jobs:
         run: |
           watchdock --help
           wd --help
+          watchdock-mcp --help
 
   optional-providers:
     name: Optional AI provider dependencies
@@ -126,6 +127,9 @@ jobs:
           python -m pip install "pip==26.2.1"
           python -m pip install ".[release]"
 
+      - name: Validate agent distribution and catalogs
+        run: python scripts/validate_agent_distribution.py
+
       - name: Read package metadata
         id: metadata
         shell: bash
@@ -144,6 +148,9 @@ jobs:
       - name: Build wheel and source distribution
         run: python -m build
 
+      - name: Build versioned agent plugin
+        run: python scripts/package_agent_plugin.py --output-dir agent-dist
+
       - name: Validate distribution metadata
         run: |
           python -m twine check dist/*
@@ -153,14 +160,20 @@ jobs:
         shell: bash
         run: |
           smoke_env="${RUNNER_TEMP}/watchdock-wheel-smoke"
+          mapfile -t wheels < <(find "${GITHUB_WORKSPACE}/dist" -maxdepth 1 -type f -name '*.whl' -print)
+          test "${#wheels[@]}" -eq 1
+          wheel_path="${wheels[0]}"
           python -m venv "${smoke_env}"
           "${smoke_env}/bin/python" -m pip install "pip==26.2.1"
-          "${smoke_env}/bin/python" -m pip install --no-cache-dir dist/*.whl
+          "${smoke_env}/bin/python" -m pip install --no-cache-dir "${wheel_path}[mcp]"
           "${smoke_env}/bin/python" -m pip check
           cd "${RUNNER_TEMP}"
           "${smoke_env}/bin/watchdock" --help
           "${smoke_env}/bin/wd" --help
+          "${smoke_env}/bin/watchdock-mcp" --help
           "${smoke_env}/bin/python" -c "import importlib.metadata as m; assert m.version('watchdock') == '${{ steps.metadata.outputs.version }}'"
+          WATCHDOCK_MCP_COMMAND="${smoke_env}/bin/watchdock-mcp" \
+            "${smoke_env}/bin/python" "${GITHUB_WORKSPACE}/scripts/mcp_stdio_smoke.py"
 
       - name: Upload validated distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -1,0 +1,20 @@
+{
+  "name": "watchdock",
+  "interface": {
+    "displayName": "WatchDock"
+  },
+  "plugins": [
+    {
+      "name": "watchdock-agent",
+      "source": {
+        "source": "local",
+        "path": "./integrations/watchdock-agent"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

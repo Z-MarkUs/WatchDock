@@ -65,7 +65,14 @@ def create_server(
         idempotent_hint=True,
         open_world_hint=False,
     )
-    analysis_only = ToolAnnotations(read_only_hint=True, open_world_hint=True)
+    # A dry-run does not mutate local files, but it can make a billable network
+    # request to an open-world provider and may return nondeterministic output.
+    analysis_only = ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=True,
+    )
     queue_write = ToolAnnotations(
         read_only_hint=False,
         destructive_hint=False,

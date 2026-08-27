@@ -20,6 +20,24 @@ def organizer(tmp_path, **config_values):
     return FileOrganizer(config, now=lambda: FIXED_NOW)
 
 
+def test_constructor_and_proposal_do_not_create_archive(tmp_path):
+    instance = organizer(tmp_path)
+    source = tmp_path / "inbox" / "draft.txt"
+    source.parent.mkdir()
+    source.write_text("draft", encoding="utf-8")
+
+    assert not instance.archive_base.exists()
+    proposal = instance.get_proposed_action(
+        str(source),
+        {"category": "Documents", "suggested_name": "final.txt", "tags": []},
+    )
+    assert not instance.archive_base.exists()
+
+    result = instance.execute_proposed_action(proposal)
+    assert result["error"] is None
+    assert instance.archive_base.is_dir()
+
+
 def test_move_uses_date_category_safe_name_and_metadata(tmp_path):
     source = tmp_path / "inbox" / "Draft report.txt"
     source.parent.mkdir()

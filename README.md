@@ -1,391 +1,312 @@
-# WatchDock
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Z-MarkUs/WatchDock/main/docs/assets/watchdock-icon.png" width="180" alt="WatchDock lighthouse and folder icon">
+</p>
 
-WatchDock is a review-first file organizer for Windows, macOS, and Linux. It can
-watch folders, ask a cloud or local model for a proposed category and filename,
-and keep the proposal in a durable approval queue. If no model is available, it
-falls back to deterministic extension rules and still leaves the source file in
-place until you approve the action.
+<h1 align="center">WatchDock</h1>
 
-WatchDock is alpha software that can rename or move files. Start with a test
-folder, keep a backup, and stay in the default `hitl` mode until you have reviewed
-its proposals.
+<p align="center"><strong>Give agents a review queue&mdash;not unchecked file moves.</strong></p>
 
-## What it does
+<p align="center">
+  WatchDock turns file-organization requests into durable, inspectable proposals.<br>
+  People work through the desktop app or CLI; coding agents use portable skills and a local MCP server.
+</p>
 
-- Watches one or more folders for stable new or changed files.
-- Creates a proposed category, filename, tags, and destination.
-- Queues every proposal in the default human-in-the-loop (`hitl`) mode.
-- Can automatically apply only a validated, high-confidence provider result in
-  `auto` mode.
-- Uses a durable SQLite queue shared by the CLI and GUI.
-- Sanitizes path components and Windows reserved filenames, keeps the original
-  extension, and avoids overwriting an existing file.
-- Writes portable tag metadata in a JSON sidecar next to the organized file.
-- Falls back to offline rules when a provider is unavailable or returns invalid
-  output. A fallback result is always review-only, even in `auto` mode.
+<p align="center">
+  <a href="https://github.com/Z-MarkUs/WatchDock/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Z-MarkUs/WatchDock/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://pypi.org/project/watchdock/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/watchdock.svg"></a>
+  <a href="https://pypi.org/project/watchdock/"><img alt="Supported Python versions" src="https://img.shields.io/pypi/pyversions/watchdock.svg"></a>
+  <a href="https://github.com/Z-MarkUs/WatchDock/releases/latest"><img alt="Latest GitHub release" src="https://img.shields.io/github/v/release/Z-MarkUs/WatchDock"></a>
+  <a href="https://github.com/Z-MarkUs/WatchDock/blob/main/LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/Z-MarkUs/WatchDock"></a>
+</p>
 
-## Requirements and installation
+<p align="center">
+  <a href="#quick-start">Quick start</a> &middot;
+  <a href="https://github.com/Z-MarkUs/WatchDock/blob/main/docs/AGENT_INTEGRATION.md">Agent setup</a> &middot;
+  <a href="https://github.com/Z-MarkUs/WatchDock/blob/main/docs/ARCHITECTURE.md">Architecture</a> &middot;
+  <a href="https://github.com/Z-MarkUs/WatchDock/blob/main/docs/SECURITY.md">Security</a>
+</p>
 
-WatchDock requires Python 3.10 or newer. A base install includes the CLI, folder
-watching, GUI code, and offline rules, but not the optional model-provider SDKs.
+> [!CAUTION]
+> WatchDock is alpha software that can rename or move files. Start with a test
+> folder, keep a backup, and use the default human-in-the-loop (`hitl`) mode
+> until you have reviewed its behavior with your own files.
 
-In PowerShell or Command Prompt:
+## One safety boundary, three interfaces
 
-```powershell
+| Interface | Best for | What it can do |
+| --- | --- | --- |
+| **Desktop app** | Visual setup and review | Configure folders, run the monitor, inspect proposals, approve, reject, and retry |
+| **CLI** | Scripts and explicit operations | Dry-run, queue, inspect, approve, reject, retry, recover, and diagnose |
+| **Agent gateway** | Codex, Claude Code, and MCP clients | Analyze, queue, list, inspect, reject, retry, and diagnose&mdash;with no approval or source-file execution tool |
+
+For an agent-queued file, the expected path is deliberately asymmetric:
+
+1. The agent analyzes one file inside a configured watched root.
+2. WatchDock freezes the proposal and a SHA-256 source fingerprint in SQLite.
+3. The source stays in place while a human reviews the exact destination.
+4. A separate GUI or CLI approval revalidates the source and executes the move.
+
+The agent integration is a constrained interface, not a sandbox around the
+agent. An agent that independently has shell or filesystem tools may have other
+ways to change files; see the
+[agent trust boundary](https://github.com/Z-MarkUs/WatchDock/blob/main/docs/AGENT_INTEGRATION.md#security-boundary).
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Z-MarkUs/WatchDock/main/docs/assets/watchdock-app.jpg" width="900" alt="WatchDock 0.3.0 desktop app overview in human-in-the-loop mode">
+</p>
+
+<p align="center"><em>The Windows desktop app, using a generic sandbox path and the default HITL workflow.</em></p>
+
+## How the default review path works
+
+```mermaid
+flowchart LR
+    A[Desktop app / CLI / watcher] --> P[Bounded analysis]
+    G[Codex / Claude Code] --> S[Skills + local stdio MCP]
+    S --> P
+    P --> V[Validate and freeze proposal]
+    V --> Q[(SQLite review queue)]
+    Q --> H{Human decision}
+    H -->|Reject| X[Durable history]
+    H -->|Approve in GUI or CLI| R[Revalidate source and destination]
+    R --> O[Exact no-replace move or rename]
+    O --> F[Archive + tag sidecar]
+```
+
+The diagram shows the default HITL route and every agent-queued action. Core
+WatchDock also has an optional `auto` mode for validated, high-confidence
+provider results; rules fallback results can never execute automatically.
+
+## Why this is more than a folder watcher
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Z-MarkUs/WatchDock/main/docs/assets/watchdock-hero.png" width="360" alt="WatchDock lighthouse guiding reviewed files into an organized folder">
+</p>
+
+- **Review-first by default.** A proposal is not a filesystem mutation.
+- **Durable state.** CLI, GUI, watcher, and agents share a transactional SQLite
+  queue with lifecycle history and atomic claims.
+- **Fail-closed file handling.** WatchDock rejects symlink sources, stale
+  fingerprints, and occupied reviewed destinations; watcher and agent routes
+  additionally reject escapes from currently enabled watched roots.
+- **Exact reviewed destinations.** Approval does not silently choose a new name
+  if the reviewed destination is no longer available.
+- **Bounded AI input.** Supported text previews are limited; binary formats are
+  classified from metadata rather than uploaded as extracted content.
+- **Offline fallback.** Missing credentials, missing SDKs, provider failures,
+  and invalid output produce deterministic review-only proposals.
+- **Cross-platform delivery.** The project tests Python 3.10&ndash;3.14 and builds
+  CLI and GUI applications for Windows, macOS, and Linux.
+
+The detailed invariants and trust boundaries live in
+[Architecture](https://github.com/Z-MarkUs/WatchDock/blob/main/docs/ARCHITECTURE.md),
+[Security](https://github.com/Z-MarkUs/WatchDock/blob/main/docs/SECURITY.md), and
+[Agent evaluations](https://github.com/Z-MarkUs/WatchDock/blob/main/docs/AGENT_EVALS.md).
+
+## Installation
+
+WatchDock requires Python 3.10 or newer.
+
+```console
 python -m pip install --upgrade pip
 python -m pip install watchdock
 ```
 
-Choose an extra when you want an AI provider:
+Choose only the optional capabilities you need:
 
-```powershell
-# OpenAI, or an Ollama server with an OpenAI-compatible endpoint
+```console
+# OpenAI, or Ollama through an OpenAI-compatible endpoint
 python -m pip install "watchdock[openai]"
 
 # Anthropic
 python -m pip install "watchdock[anthropic]"
 
-# Both provider SDKs
-python -m pip install "watchdock[ai]"
+# Local MCP server for coding-agent integrations
+python -m pip install "watchdock[mcp]"
+
+# MCP plus both cloud-provider SDKs
+python -m pip install "watchdock[mcp,ai]"
 ```
 
-PowerShell needs the quotes around a requirement containing brackets. On Windows,
-`py -m pip` is also valid if the Python launcher is installed. Tkinter is supplied
-by most standard Python installers; `watchdock gui` reports an error if it is not
-available.
+PowerShell and Command Prompt need the quotes around requirements containing
+brackets. Tkinter is included by most standard Python installers.
 
-The base install can produce review-only rules proposals. Because the generated
-configuration names OpenAI as its provider, `watchdock doctor` reports a missing
-OpenAI SDK as a warning in safe `hitl` mode and as an error in `auto` mode. If you
-change provider, install its required extra; Ollama also needs the `openai` extra,
-even though its current doctor check only displays the configured endpoint.
+Agent/MCP support belongs to the 0.3.0 release line. If the PyPI badge above
+still shows 0.2.x, install the current source checkout for agent testing:
 
-### Install from source
-
-```powershell
-git clone https://github.com/Z-MarkUs/watchdock.git
-cd watchdock
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+```console
+git clone https://github.com/Z-MarkUs/WatchDock.git
+cd WatchDock
+python -m pip install -e ".[mcp]"
 ```
 
-If PowerShell blocks activation, use `.venv\Scripts\activate.bat` from Command
-Prompt, or run `.venv\Scripts\python.exe` directly. See [CONTRIBUTING.md](CONTRIBUTING.md)
-for checks used by the project.
+Standalone CLI and GUI archives are available from
+[GitHub Releases](https://github.com/Z-MarkUs/WatchDock/releases/latest). They
+are currently unsigned. Published 0.2.x archives contain CLI and GUI only; the
+0.3.0 release candidate adds a third, separately smoke-tested MCP executable.
+Until that release is public and its assets are verified, install
+`watchdock[mcp]` for `watchdock-mcp`.
 
 ## Quick start
 
-Initialization and monitoring are explicit; running `watchdock` with no command
-shows help and does not start a watcher.
+Initialization and monitoring are explicit. Running `watchdock` without a
+subcommand shows help and does not start a watcher.
 
-```powershell
+```console
 watchdock config init
 watchdock config validate
 watchdock doctor
+watchdock gui
+```
+
+The generated configuration watches `~/Downloads` non-recursively, archives
+under `~/Documents/Archive`, and uses `hitl` mode. Inspect it before choosing
+**Start Monitor** in the GUI or running this foreground command:
+
+```console
 watchdock start
 ```
 
-`watchdock config init` creates a review-first configuration. Inspect it before
-starting. The default watches your `Downloads` folder non-recursively, archives
-under `Documents\Archive`, and uses `hitl` mode. `watchdock start` runs in the
-foreground until you press `Ctrl+C` or close the terminal.
+To see the review boundary without starting a watcher:
 
-For OpenAI or Anthropic, prefer an environment variable instead of putting a key
-in JSON. These PowerShell assignments last for the current terminal only:
-
-```powershell
-$env:WATCHDOCK_OPENAI_API_KEY = "<your OpenAI API key>"
-# Or, when ai_config.provider is "anthropic":
-$env:WATCHDOCK_ANTHROPIC_API_KEY = "<your Anthropic API key>"
-```
-
-Standard `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` variables are also recognized.
-The WatchDock-prefixed variable takes precedence. Open a new terminal or remove
-the variable after testing if you do not want the key to remain in that process.
-
-## A safe Windows sandbox walkthrough
-
-This walkthrough isolates both the files and WatchDock state under a temporary
-directory. Install `watchdock[openai]` but do not set an API key; this deliberately
-exercises the offline, review-only fallback without making a cloud request.
-
-```powershell
-python -m pip install "watchdock[openai]"
-
-$Sandbox = Join-Path $env:TEMP "watchdock-sandbox"
-$Inbox = Join-Path $Sandbox "inbox"
-$Archive = Join-Path $Sandbox "archive"
-$env:WATCHDOCK_HOME = Join-Path $Sandbox "state"
-New-Item -ItemType Directory -Force $Inbox, $Archive | Out-Null
-
-watchdock config init
-
-$ConfigPath = Join-Path $env:WATCHDOCK_HOME "config.json"
-$Config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
-$Config.watched_folders[0].path = $Inbox
-$Config.archive_config.base_path = $Archive
-$Config.mode = "hitl"
-$Json = $Config | ConvertTo-Json -Depth 6
-$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[IO.File]::WriteAllText($ConfigPath, $Json + [Environment]::NewLine, $Utf8NoBom)
-
-watchdock config validate
-watchdock doctor
-"Quarterly planning notes" | Set-Content (Join-Path $Inbox "sample notes.txt")
-watchdock process (Join-Path $Inbox "sample notes.txt")
-```
-
-The final command is a dry run and prints an analysis and proposal. With no API
-key, the output has `"analysis_source": "rules"` and
-`"requires_review": true`; the file remains in the inbox. Queue and review that
-same proposal:
-
-```powershell
-watchdock process (Join-Path $Inbox "sample notes.txt") --queue
+```console
+watchdock process "/path/to/file.txt"          # dry run
+watchdock process "/path/to/file.txt" --queue  # durable pending action
 watchdock list-pending
-watchdock approve ACTION_ID
+watchdock approve ACTION_ID                     # separate human decision
 ```
 
-Approval moves the file under the sandbox archive. To test continuous watching,
-run `watchdock start` in that PowerShell window, create another file from a second
-window using the same `WATCHDOCK_HOME`, then return to the first window and press
-`Ctrl+C`. Environment variables are per-process, so set `WATCHDOCK_HOME` again in
-each new terminal or pass the configuration explicitly:
+For a no-credential sandbox, leave the generated provider key unset. WatchDock
+uses its deterministic rules fallback, marks the result review-only, and keeps
+the source in place until approval.
 
-```powershell
-watchdock --config "$Sandbox\state\config.json" status
+## Agent quick start
+
+Install the MCP extra, initialize WatchDock, then add the version-pinned Codex
+marketplace and plugin:
+
+```console
+python -m pip install "watchdock[mcp]"
+watchdock config init
+codex plugin marketplace add Z-MarkUs/WatchDock --ref v0.3.0
+codex plugin add watchdock-agent@watchdock
 ```
 
-Remove the sandbox when you have finished and confirmed it contains nothing you
-need.
+The tagged commands are the preferred public install path once `v0.3.0` is
+published. For release-candidate testing, substitute `--ref main`; the live
+Codex flow remains a release gate. A direct `codex mcp add` setup is documented
+as a development fallback.
+
+The repository includes three portable workflows:
+`watchdock-organize`, `watchdock-review`, and `watchdock-doctor`. The complete
+guide covers the Codex and Claude Code marketplaces, direct MCP and individual
+skill installation, custom configuration paths, all eight MCP tools, and their
+exact side effects:
+
+**[Set up WatchDock for coding agents &rarr;](https://github.com/Z-MarkUs/WatchDock/blob/main/docs/AGENT_INTEGRATION.md)**
+
+Codex and Claude Code live end-to-end acceptance is intentionally tracked as a
+release gate rather than claimed from manifest presence alone. See
+[Agent evaluations](https://github.com/Z-MarkUs/WatchDock/blob/main/docs/AGENT_EVALS.md)
+for the current evidence and remaining checks.
 
 ## Review modes
 
 ### Human-in-the-loop (`hitl`, default)
 
 Every watcher result is stored as `pending`. Nothing is moved or renamed until
-you approve it with the CLI or GUI. Rejection records the decision without
-touching the source.
+a human approves it in the CLI or GUI. Rejection records the decision without
+touching the source. The agent gateway always queues for this separate review.
 
 ### Automatic (`auto`)
 
-A provider result is applied automatically only after it passes WatchDock's
-structured validation and is marked high confidence. Missing credentials, a
-missing SDK, a provider error, or invalid provider output produces a low-confidence
-rules result with `requires_review=true`; WatchDock queues it and does not move the
-source. Auto mode is not recommended until you have tested your exact folders,
-provider, model, and archive rules.
+Core WatchDock can automatically apply a provider result only after structured
+validation and a high-confidence result. Missing credentials, unavailable SDKs,
+provider errors, invalid output, and deterministic fallback results remain
+review-only. Test `auto` mode with a sandbox before using it on real folders.
 
-## CLI reference
+## Configuration and state
 
-Both `watchdock` and `wd` invoke the same CLI.
+The generated JSON is intentionally explicit. A portable example is available
+at
+[config.example.json](https://github.com/Z-MarkUs/WatchDock/blob/main/config.example.json).
+Validation rejects duplicate watched paths and any enabled watched folder that
+contains, equals, or is contained by the archive path.
 
-```text
-watchdock --help
-watchdock --version
-watchdock version
-watchdock version --check
-watchdock update
+Provider credentials should come from environment variables:
 
-watchdock config init
-watchdock config init --force
-watchdock config validate
-watchdock config show
+| Provider | Preferred variable | Compatible fallback |
+| --- | --- | --- |
+| OpenAI | `WATCHDOCK_OPENAI_API_KEY` | `OPENAI_API_KEY` |
+| Anthropic | `WATCHDOCK_ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY` |
 
-watchdock status
-watchdock status --json
-watchdock doctor
-watchdock gui
-watchdock start
+Default local state lives under `~/.watchdock`:
 
-watchdock process FILE
-watchdock process FILE --queue
-watchdock process FILE --apply
-
-watchdock list-pending
-watchdock list-pending --all
-watchdock approve ACTION_ID
-watchdock reject ACTION_ID
-watchdock retry ACTION_ID
-watchdock recover-stale
-watchdock recover-stale --older-than SECONDS
-```
-
-- `config init --force` replaces an existing configuration; use it deliberately.
-- `config show` redacts a non-empty inline API key.
-- `doctor` checks configuration, watched folders, archive writability, provider
-  package/credentials, and the SQLite queue. For Ollama it reports the configured
-  endpoint but does not perform a network health check.
-- `process FILE` is a dry run. `--queue` stores the proposal. `--apply` performs a
-  fresh analysis and immediately applies it if it is high confidence; it refuses
-  fallback results but is independent of the configured HITL mode. Dry-run first,
-  then use the queue when you need approval of one frozen proposal.
-- `list-pending` includes pending and failed actions; `--all` also includes
-  processing, completed, and rejected history.
-- `retry` changes a failed action back to pending; it does not execute it. Run
-  `approve` after reviewing it again.
-- `recover-stale` marks old `processing` claims as failed for manual
-  reconciliation. Startup does this conservatively for claims older than 24
-  hours. Because a crashed process may have moved a file before recording
-  completion, inspect both source and destination before retrying.
-- `update` upgrades a pip installation after checking PyPI. A standalone build
-  cannot self-update.
-- `--config PATH` is accepted before or after a subcommand and uses the selected
-  configuration's parent directory for its queue, examples, and logs.
-
-## Configuration
-
-The generated JSON is intentionally complete and can be edited directly. A
-portable sample is in [config.example.json](config.example.json).
-
-```json
-{
-  "watched_folders": [
-    {
-      "path": "~/Downloads",
-      "enabled": true,
-      "recursive": false,
-      "file_extensions": null
-    }
-  ],
-  "ai_config": {
-    "provider": "openai",
-    "api_key": null,
-    "model": "gpt-5.6-luna",
-    "base_url": null,
-    "temperature": 0.3
-  },
-  "archive_config": {
-    "base_path": "~/Documents/Archive",
-    "create_date_folders": true,
-    "create_category_folders": true,
-    "move_files": true
-  },
-  "log_level": "INFO",
-  "check_interval": 1.0,
-  "mode": "hitl"
-}
-```
-
-`~` expands to the current user's home directory on Windows, macOS, and Linux.
-`file_extensions` may be `null` for all files or a list such as
-`[".pdf", ".txt"]`. Validation rejects duplicate watched paths and any enabled
-watched folder that contains, equals, or is contained by the archive path; this
-prevents archive feedback loops.
-
-When `move_files` is true, the default layout is
-`Archive/YYYY-MM/Category/filename.ext`. When false, WatchDock only renames the
-file in its source folder. If a new automatic proposal collides with an existing
-name, WatchDock adds `_1`, `_2`, and so on. A reviewed action instead fails when
-its exact destination has become occupied, because silently changing an approved
-destination would invalidate the review.
-
-For Ollama, install the `openai` or `ai` extra, set `provider` to `ollama`, choose
-a model available on your server, and set an OpenAI-compatible URL such as
-`http://localhost:11434/v1`. Provider/model availability is deployment-specific;
-the default model shown above may need to be changed for your account or server.
-
-## State, logs, and tags
-
-By default WatchDock stores its local state in `%USERPROFILE%\.watchdock` on
-Windows and `~/.watchdock` elsewhere:
-
-| Purpose | Default path |
+| Purpose | Path |
 | --- | --- |
 | Configuration | `~/.watchdock/config.json` |
 | Review queue and history | `~/.watchdock/pending_actions.sqlite3` |
 | Few-shot examples | `~/.watchdock/few_shot_examples.json` |
-| Active log | `~/.watchdock/logs/watchdock.log` |
+| Rotating log | `~/.watchdock/logs/watchdock.log` |
 
-Logs rotate at about 2 MiB and retain three backups. SQLite may create temporary
-`-wal` and `-shm` companion files while WatchDock is running.
+Set `WATCHDOCK_HOME` before starting WatchDock to relocate the entire default
+state root. Passing `--config PATH` uses that configuration's parent directory
+for the queue, examples, and logs.
 
-Set `WATCHDOCK_HOME` before running a command to relocate all default state:
+Each non-empty tag list is written beside the organized file as
+`filename.ext.watchdock.json`. It is a portable JSON sidecar, not an operating
+system extended attribute.
 
-```powershell
-$env:WATCHDOCK_HOME = "D:\WatchDockState"
-watchdock config init
+## CLI map
+
+Both `watchdock` and `wd` invoke the same CLI.
+
+```text
+watchdock --help                     watchdock --version
+watchdock config init                watchdock config validate
+watchdock config show                watchdock doctor
+watchdock status [--json]            watchdock gui
+watchdock start                      watchdock process FILE
+watchdock process FILE --queue       watchdock process FILE --apply
+watchdock list-pending [--all]       watchdock approve ACTION_ID
+watchdock reject ACTION_ID           watchdock retry ACTION_ID
+watchdock recover-stale              watchdock version --check
+watchdock update                     watchdock-mcp [--config PATH]
 ```
 
-Each non-empty tag list is stored next to the final file as
-`filename.ext.watchdock.json`. This is a portable JSON sidecar, not an NTFS,
-Finder, or Linux extended-attribute tag. The watcher ignores these sidecars.
+`process FILE` is a dry run. `--queue` stores the frozen proposal. `--apply`
+performs a new analysis and only executes a high-confidence provider result; it
+refuses fallback results. `retry` returns a failed action to pending but does not
+execute it. `recover-stale` marks uncertain old processing claims as failed for
+manual reconciliation.
 
-## Content analysis and privacy
+## Privacy and operational limits
 
 For supported text files, WatchDock reads at most 5,000 UTF-8 characters locally
-and includes at most the first 2,000 characters in a provider prompt. Supported
-preview extensions are `.txt`, `.md`, `.rst`, `.py`, `.js`, `.ts`, `.json`,
-`.xml`, `.csv`, `.log`, `.yaml`, `.yml`, and `.toml`; files identified by the
-operating system as `text/*` may also be previewed. Invalid UTF-8 bytes are
-replaced for the preview.
+and includes at most 2,000 characters in a configured provider prompt. It does
+not extract content from PDF, Office, image, audio, video, or archive files.
 
-PDF, Office, image, audio, video, archive, and other binary contents are not
-parsed, OCR'd, or transcribed. Those files are classified from filename,
-extension, size, and MIME type only.
+Agent tools can reveal absolute watched paths, proposed destinations, analysis,
+errors, and action rows from requested lifecycle states to the connected agent client. That
+client may itself use a remote model. The MCP server is local stdio, but local
+transport does not mean the complete agent workflow is local or private.
 
-When OpenAI or Anthropic is configured and available, WatchDock sends that
-metadata, the optional text excerpt, and up to five sanitized few-shot examples
-to the selected provider. The OpenAI integration uses the Responses API with a
-strict structured-output schema and sends `store=false`. That request setting is
-not a promise of zero retention or zero transient processing; review the
-provider's current terms, account controls, and logging policy before sending
-sensitive material. Anthropic data handling likewise depends on your provider
-agreement. Avoid sensitive watched folders unless you have assessed those terms.
+Current limitations include no built-in undo, content deduplication, encryption,
+binary-document understanding, background service, tray process, or signed
+desktop applications. A file move and its sidecar write are not one filesystem
+transaction. Review the full recovery guidance and residual risks in
+[Security and privacy](https://github.com/Z-MarkUs/WatchDock/blob/main/docs/SECURITY.md).
 
-Ollama requests go to the configured endpoint. Whether that endpoint is local and
-what it records depends on your Ollama deployment. With no usable client,
-WatchDock's deterministic rules fallback does not make a provider request.
+## Project documentation
 
-More detail is in [docs/SECURITY.md](docs/SECURITY.md).
+- [Agent integration](https://github.com/Z-MarkUs/WatchDock/blob/main/docs/AGENT_INTEGRATION.md)
+- [Agent evaluation plan and evidence](https://github.com/Z-MarkUs/WatchDock/blob/main/docs/AGENT_EVALS.md)
+- [Architecture](https://github.com/Z-MarkUs/WatchDock/blob/main/docs/ARCHITECTURE.md)
+- [Security and privacy](https://github.com/Z-MarkUs/WatchDock/blob/main/docs/SECURITY.md)
+- [Changelog](https://github.com/Z-MarkUs/WatchDock/blob/main/CHANGELOG.md)
+- [Contributing](https://github.com/Z-MarkUs/WatchDock/blob/main/CONTRIBUTING.md)
 
-## GUI and foreground monitoring
+## Author and license
 
-`watchdock gui` opens the Tk desktop UI for configuration, examples, monitoring,
-and review actions. Monitoring started by the GUI runs only while that GUI process
-is open. **Start Monitor** first validates and saves the current settings, then
-runs the monitor on a background thread within that process. The GUI blocks Save
-and Reload while monitoring so review actions cannot diverge from the running
-configuration; stop the monitor before changing settings. `watchdock start`
-likewise runs in the current terminal. WatchDock does not currently install a
-Windows service, a macOS LaunchAgent, a Linux systemd unit, a tray process, or an
-automatic-start task.
-
-The GUI needs a working graphical display and Tk. The CLI is the supported option
-for headless sessions. Standalone application archives may be produced for tagged
-releases, but they are unsigned and cannot self-update; verify release checksums
-and expect operating-system warnings where applicable.
-
-## Recovery and current limitations
-
-- There is no undo command. To reverse an approved move, stop WatchDock, inspect
-  the completed action with `watchdock list-pending --all`, and move the file back
-  manually. Move or remove its `.watchdock.json` sidecar with it.
-- Before backing up state, stop the CLI watcher and GUI, then copy the entire
-  WatchDock state directory so the SQLite database and any companion files remain
-  consistent.
-- If a queued source changes after review, approval fails and retains the action
-  as `failed`; re-analyze the file rather than trusting the stale proposal.
-- If an action fails, inspect its error with `watchdock list-pending`, correct the
-  cause, run `watchdock retry ACTION_ID`, review again, and then approve it.
-- If WatchDock exits during approval, use `watchdock recover-stale` only after
-  checking whether the source or destination already reflects the action. The
-  command intentionally records an uncertain claim as failed rather than
-  guessing that it completed.
-- A file move/rename and sidecar write are not one transaction. A sidecar failure
-  is logged as a warning after the file operation may already have succeeded.
-- File arrival detection is best-effort and depends on the operating system and
-  filesystem. WatchDock debounces events, waits for a file to stabilize, ignores
-  common partial-download suffixes, and retries transient failures, but you should
-  still test applications that write files in unusual ways.
-- There is no built-in archive browser, duplicate-content detection, rollback,
-  encryption, provider billing control, or binary-document understanding.
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the processing flow and trust
-boundaries.
-
-## License
-
-[MIT](LICENSE)
+Built by [Hehan Zhao](https://github.com/Z-MarkUs) and released under the
+[MIT License](https://github.com/Z-MarkUs/WatchDock/blob/main/LICENSE).

@@ -165,16 +165,10 @@ def test_build_config_rejects_unsafe_values(
 
 
 def test_review_approval_executes_exact_proposal_then_completes(tmp_path):
-    source = tmp_path / "incoming.txt"
+    config = _valid_config(tmp_path)
+    source = Path(config.watched_folders[0].path) / "incoming.txt"
     source.write_text("reviewed", encoding="utf-8")
-    organizer = FileOrganizer(
-        ArchiveConfig(
-            str(tmp_path / "archive"),
-            create_date_folders=False,
-            create_category_folders=False,
-            move_files=True,
-        )
-    )
+    organizer = FileOrganizer(config.archive_config)
     analysis = {
         "category": "Documents",
         "suggested_name": "approved.txt",
@@ -184,7 +178,9 @@ def test_review_approval_executes_exact_proposal_then_completes(tmp_path):
     queue = PendingActionsQueue(db_path=tmp_path / "pending_actions.sqlite3")
     action = queue.add(str(source), analysis, proposal, include_source_hash=True)
 
-    result = execute_review_action(queue, organizer, action.action_id)
+    result = execute_review_action(
+        queue, organizer, action.action_id, config=config
+    )
 
     assert result.success is True
     assert result.status == "completed"
@@ -195,24 +191,22 @@ def test_review_approval_executes_exact_proposal_then_completes(tmp_path):
 
 
 def test_review_approval_retains_source_change_as_failed_and_can_retry(tmp_path):
-    source = tmp_path / "incoming.txt"
+    config = _valid_config(tmp_path)
+    source = Path(config.watched_folders[0].path) / "incoming.txt"
     source.write_text("reviewed", encoding="utf-8")
-    organizer = FileOrganizer(
-        ArchiveConfig(
-            str(tmp_path / "archive"),
-            create_date_folders=False,
-            create_category_folders=False,
-            move_files=True,
-        )
-    )
+    organizer = FileOrganizer(config.archive_config)
     analysis = {"category": "Documents", "suggested_name": "approved.txt"}
     proposal = organizer.get_proposed_action(str(source), analysis)
     queue = PendingActionsQueue(db_path=tmp_path / "pending_actions.sqlite3")
     action = queue.add(str(source), analysis, proposal, include_source_hash=True)
     source.write_text("changed after review", encoding="utf-8")
 
-    first = execute_review_action(queue, organizer, action.action_id)
-    second = execute_review_action(queue, organizer, action.action_id)
+    first = execute_review_action(
+        queue, organizer, action.action_id, config=config
+    )
+    second = execute_review_action(
+        queue, organizer, action.action_id, config=config
+    )
 
     assert first.success is False
     assert first.status == "failed"
@@ -226,7 +220,8 @@ def test_review_approval_retains_source_change_as_failed_and_can_retry(tmp_path)
 
 
 def test_review_approval_retains_organizer_error(tmp_path):
-    source = tmp_path / "incoming.txt"
+    config = _valid_config(tmp_path)
+    source = Path(config.watched_folders[0].path) / "incoming.txt"
     source.write_text("reviewed", encoding="utf-8")
     queue = PendingActionsQueue(db_path=tmp_path / "pending_actions.sqlite3")
     action = queue.add(
@@ -245,12 +240,40 @@ def test_review_approval_retains_organizer_error(tmp_path):
             assert proposed_action == action.proposed_action
             return {"error": "destination is locked", "new_path": None}
 
-    result = execute_review_action(queue, ErrorOrganizer(), action.action_id)
+    result = execute_review_action(
+        queue, ErrorOrganizer(), action.action_id, config=config
+    )
 
     assert result.success is False
     assert result.status == "failed"
     assert result.error == "destination is locked"
     assert queue.get_by_id(action.action_id).error == "destination is locked"
+
+
+def test_review_approval_fails_when_current_config_disables_the_source_root(
+    tmp_path,
+):
+    config = _valid_config(tmp_path)
+    source = Path(config.watched_folders[0].path) / "removed-root.txt"
+    source.write_text("reviewed", encoding="utf-8")
+    organizer = FileOrganizer(config.archive_config)
+    analysis = {"category": "Documents", "suggested_name": "approved.txt"}
+    proposal = organizer.get_proposed_action(str(source), analysis)
+    queue = PendingActionsQueue(db_path=tmp_path / "pending_actions.sqlite3")
+    action = queue.add(str(source), analysis, proposal, include_source_hash=True)
+
+    config.watched_folders[0].enabled = False
+    result = execute_review_action(
+        queue, organizer, action.action_id, config=config
+    )
+
+    assert result.success is False
+    assert result.status == "failed"
+    assert "currently enabled watched folder" in result.error
+    retained = queue.get_by_id(action.action_id)
+    assert retained.status == "failed"
+    assert source.read_text(encoding="utf-8") == "reviewed"
+    assert not Path(action.proposed_action["to"]).exists()
 
 
 def test_run_gui_forwards_custom_config_path(monkeypatch, tmp_path):

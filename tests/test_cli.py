@@ -168,6 +168,40 @@ def test_approval_fails_if_source_changed_after_review(tmp_path, capsys):
     assert "source changed" in capsys.readouterr().out
 
 
+def test_approval_fails_if_source_is_no_longer_in_an_enabled_watched_root(
+    tmp_path, capsys
+):
+    config_path = write_config(tmp_path)
+    config = WatchDockConfig.load(str(config_path))
+    source = tmp_path / "inbox" / "removed-root.txt"
+    source.write_text("reviewed", encoding="utf-8")
+    destination = tmp_path / "archive" / "removed-root.txt"
+    queue = PendingActionsQueue(db_path=tmp_path / "pending_actions.sqlite3")
+    action = queue.add(
+        str(source),
+        {"category": "Documents"},
+        {
+            "action_type": "move",
+            "from": str(source),
+            "to": str(destination),
+        },
+        include_source_hash=True,
+    )
+
+    replacement_root = tmp_path / "different-inbox"
+    replacement_root.mkdir()
+    config.watched_folders = [WatchedFolder(str(replacement_root), enabled=True)]
+    config.save(str(config_path))
+
+    assert main(["approve", action.action_id, "--config", str(config_path)]) == 1
+    retained = queue.get_by_id(action.action_id)
+    assert retained.status == "failed"
+    assert "currently enabled watched folder" in retained.error
+    assert source.read_text(encoding="utf-8") == "reviewed"
+    assert not destination.exists()
+    assert "currently enabled watched folder" in capsys.readouterr().out
+
+
 def test_unexpected_approval_exception_is_durably_failed(tmp_path, monkeypatch):
     config_path = write_config(tmp_path)
     config = WatchDockConfig.load(str(config_path))

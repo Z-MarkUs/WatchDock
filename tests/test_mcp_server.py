@@ -75,7 +75,10 @@ def test_mcp_v2_inventory_is_exact_and_has_no_approval_tool(tmp_path):
     assert by_name["doctor"].annotations.read_only_hint is False
     assert by_name["doctor"].annotations.destructive_hint is False
     assert by_name["doctor"].annotations.idempotent_hint is True
-    assert by_name["analyze_file"].annotations.read_only_hint is True
+    assert by_name["analyze_file"].annotations.read_only_hint is False
+    assert by_name["analyze_file"].annotations.destructive_hint is False
+    assert by_name["analyze_file"].annotations.idempotent_hint is False
+    assert by_name["analyze_file"].annotations.open_world_hint is True
     assert by_name["queue_file"].annotations.read_only_hint is False
     assert by_name["queue_file"].annotations.destructive_hint is False
     assert by_name["reject_action"].annotations.destructive_hint is True

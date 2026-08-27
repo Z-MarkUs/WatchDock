@@ -40,7 +40,7 @@ jobs:
             executable-extension: ""
             gui-extension: .app
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Check out source
@@ -56,22 +56,30 @@ jobs:
       - name: Install application and frozen-build tooling
         run: |
           python -m pip install "pip==26.2.1"
-          python -m pip install ".[ai]" "pyinstaller==6.22.2"
+          python -m pip install ".[ai,mcp]" "pyinstaller==6.22.2"
 
       - name: Build standalone applications
         run: |
           python -m PyInstaller --clean --noconfirm --onefile --name "watchdock-cli-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}" watchdock/main.py
           python -m PyInstaller --clean --noconfirm --onefile --windowed --name "WatchDock-gui-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}" watchdock/gui_main.py
+          python -m PyInstaller --clean --noconfirm --onefile --hidden-import mcp.server --hidden-import mcp.types --copy-metadata mcp --collect-all openai --collect-all anthropic --name "watchdock-mcp-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}" watchdock/mcp_server.py
 
-      - name: Verify distinct CLI and GUI applications
+      - name: Verify distinct CLI, GUI, and MCP applications
         env:
           CLI_APPLICATION: dist/watchdock-cli-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}${{ matrix.executable-extension }}
           GUI_APPLICATION: dist/WatchDock-gui-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}${{ matrix.gui-extension }}
+          MCP_APPLICATION: dist/watchdock-mcp-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}${{ matrix.executable-extension }}
         shell: bash
         run: |
           test -e "${CLI_APPLICATION}"
           test -e "${GUI_APPLICATION}"
-          test "$(python -c 'import os; from pathlib import Path; print(Path(os.environ["CLI_APPLICATION"]).resolve())')" != "$(python -c 'import os; from pathlib import Path; print(Path(os.environ["GUI_APPLICATION"]).resolve())')"
+          test -e "${MCP_APPLICATION}"
+          cli_path="$(python -c 'import os; from pathlib import Path; print(Path(os.environ["CLI_APPLICATION"]).resolve())')"
+          gui_path="$(python -c 'import os; from pathlib import Path; print(Path(os.environ["GUI_APPLICATION"]).resolve())')"
+          mcp_path="$(python -c 'import os; from pathlib import Path; print(Path(os.environ["MCP_APPLICATION"]).resolve())')"
+          test "${cli_path}" != "${gui_path}"
+          test "${cli_path}" != "${mcp_path}"
+          test "${gui_path}" != "${mcp_path}"
 
       - name: Smoke test CLI executable
         shell: bash
@@ -81,6 +89,19 @@ jobs:
         run: |
           "${CLI_APPLICATION}" --help
           test "$("${CLI_APPLICATION}" version)" = "WatchDock ${RELEASE_VERSION}"
+
+      - name: Smoke test MCP executable help
+        shell: bash
+        env:
+          MCP_APPLICATION: dist/watchdock-mcp-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}${{ matrix.executable-extension }}
+        run: |
+          "${MCP_APPLICATION}" --help
+
+      - name: Exercise frozen MCP executable over stdio
+        working-directory: ${{ runner.temp }}
+        env:
+          WATCHDOCK_MCP_COMMAND: ${{ github.workspace }}/dist/watchdock-mcp-${{ needs.validate.outputs.version }}-${{ matrix.artifact-suffix }}${{ matrix.executable-extension }}
+        run: python "${{ github.workspace }}/scripts/mcp_stdio_smoke.py"
 
       - name: Smoke test Windows GUI executable startup
         if: runner.os == 'Windows'
@@ -123,28 +144,63 @@ jobs:
           retention-days: 30
           compression-level: 0
 
+  agent:
+    name: Build validated agent plugin
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Validate catalogs and package agent plugin
+        run: |
+          python scripts/validate_agent_distribution.py
+          python scripts/package_agent_plugin.py --output-dir agent-dist
+          python scripts/validate_agent_distribution.py --archive "agent-dist/watchdock-agent-${{ needs.validate.outputs.version }}.zip"
+
+      - name: Upload validated agent plugin
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: watchdock-${{ needs.validate.outputs.version }}-agent
+          path: agent-dist/watchdock-agent-${{ needs.validate.outputs.version }}.zip
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
   release-assets:
-    name: Create draft release with verified applications
+    name: Create draft release with verified applications and agent plugin
     needs:
       - validate
       - build
+      - agent
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
 
     steps:
-      - name: Download platform applications
+      - name: Download verified release archives
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: watchdock-${{ needs.validate.outputs.version }}-*
           path: release-assets
           merge-multiple: true
 
-      - name: Generate SHA-256 checksums
+      - name: Verify agent plugin and generate SHA-256 checksums
         working-directory: release-assets
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         shell: bash
-        run: sha256sum *.zip | sort -k2 > SHA256SUMS.txt
+        run: |
+          test -f "watchdock-agent-${RELEASE_VERSION}.zip"
+          sha256sum *.zip | sort -k2 > SHA256SUMS.txt
 
       - name: Create or update draft GitHub release
         env:
@@ -153,7 +209,9 @@ jobs:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         shell: bash
         run: |
-          if ! gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            test "$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft)" = "true"
+          else
             gh release create "${RELEASE_TAG}" \
               --repo "${GITHUB_REPOSITORY}" \
               --verify-tag \

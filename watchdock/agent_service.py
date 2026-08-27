@@ -12,7 +12,13 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, TypedDict
+from typing import Any, Dict, Iterable, List, Mapping, Optional
+
+try:
+    # Pydantic's schema builder requires the backport on Python < 3.12.
+    from typing_extensions import TypedDict
+except ImportError:  # pragma: no cover - base installs do not require the backport
+    from typing import TypedDict
 
 from watchdock import __version__
 from watchdock.ai_processor import AIProcessor
@@ -191,6 +197,7 @@ class AgentService:
         return {
             "file_path": source,
             "analysis": analysis,
+            "analysis_execution": self._analysis_execution(analysis),
             "proposed_action": proposal,
             "source_fingerprint": after_analysis,
         }
@@ -222,6 +229,61 @@ class AgentService:
             raise AgentServiceError("invalid_request", "action_id is too long")
         return action_id.strip()
 
+    def _provider_capability(self) -> Dict[str, Any]:
+        """Describe whether the configured provider client can be used locally."""
+
+        provider = self.config.ai_config.provider
+        client_package = "openai" if provider in {"openai", "ollama"} else provider
+        package_installed = importlib.util.find_spec(client_package) is not None
+        processor_available = getattr(self.ai_processor, "available", None)
+        client_available = (
+            package_installed
+            if processor_available is None
+            else bool(processor_available)
+        )
+        credential_configured = (
+            True
+            if provider == "ollama"
+            else bool(self.config.ai_config.resolved_api_key())
+        )
+        unavailable_reason = getattr(self.ai_processor, "unavailable_reason", None)
+        return {
+            "client_package": client_package,
+            "package_installed": package_installed,
+            "client_available": client_available,
+            "credential_configured": credential_configured,
+            "ready": (
+                package_installed and client_available and credential_configured
+            ),
+            "unavailable_reason": (
+                str(unavailable_reason)[:500] if unavailable_reason else None
+            ),
+        }
+
+    def _analysis_execution(self, analysis: Mapping[str, Any]) -> Dict[str, Any]:
+        """Report whether analysis attempted a provider request.
+
+        ``AIProcessor`` always attempts its configured provider when its client
+        is available, even when a provider error later produces a rules result.
+        A rules result from an unavailable client is entirely local.
+        """
+
+        source_value = analysis.get("analysis_source")
+        source = str(source_value)[:100] if source_value else "unspecified"
+        processor_available = getattr(self.ai_processor, "available", None)
+        if source == "rules":
+            provider_request_attempted = bool(processor_available)
+        elif source == self.config.ai_config.provider:
+            provider_request_attempted = True
+        else:
+            # Third-party processors may not expose either signal. Preserve
+            # compatibility while making the uncertainty explicit.
+            provider_request_attempted = processor_available is not False
+        return {
+            "source": source,
+            "provider_request_attempted": provider_request_attempted,
+        }
+
     def status(self) -> AgentResponse:
         """Return configuration, watched-root, provider, and queue status."""
 
@@ -245,16 +307,7 @@ class AgentService:
                 for state in sorted(ACTION_STATES)
             }
             provider = self.config.ai_config.provider
-            package_installed = (
-                True
-                if provider == "ollama"
-                else importlib.util.find_spec(provider) is not None
-            )
-            credential_configured = (
-                True
-                if provider == "ollama"
-                else bool(self.config.ai_config.resolved_api_key())
-            )
+            provider_capability = self._provider_capability()
             archive = Path(self.config.archive_config.base_path).expanduser()
             return _success(
                 operation,
@@ -267,9 +320,7 @@ class AgentService:
                     "ai": {
                         "provider": provider,
                         "model": self.config.ai_config.model,
-                        "package_installed": package_installed,
-                        "credential_configured": credential_configured,
-                        "ready": package_installed and credential_configured,
+                        **provider_capability,
                     },
                     "archive": {
                         "path": str(archive),
@@ -338,24 +389,47 @@ class AgentService:
                         pass
 
             provider = self.config.ai_config.provider
+            capability = self._provider_capability()
+            fallback_level = "ERROR" if self.config.mode == "auto" else "WARN"
+            checks.append(
+                {
+                    "level": (
+                        "OK" if capability["package_installed"] else fallback_level
+                    ),
+                    "name": "provider package",
+                    "message": (
+                        capability["client_package"]
+                        if capability["package_installed"]
+                        else f"install WatchDock[{capability['client_package']}]"
+                    ),
+                }
+            )
+            checks.append(
+                {
+                    "level": (
+                        "OK" if capability["client_available"] else fallback_level
+                    ),
+                    "name": "provider client",
+                    "message": (
+                        "initialized"
+                        if capability["client_available"]
+                        else capability["unavailable_reason"]
+                        or "client could not be initialized"
+                    ),
+                }
+            )
             if provider in {"openai", "anthropic"}:
-                package_present = importlib.util.find_spec(provider) is not None
-                fallback_level = "ERROR" if self.config.mode == "auto" else "WARN"
                 checks.append(
                     {
-                        "level": "OK" if package_present else fallback_level,
-                        "name": "provider package",
-                        "message": provider if package_present else f"install WatchDock[{provider}]",
-                    }
-                )
-                credential_present = bool(self.config.ai_config.resolved_api_key())
-                checks.append(
-                    {
-                        "level": "OK" if credential_present else fallback_level,
+                        "level": (
+                            "OK"
+                            if capability["credential_configured"]
+                            else fallback_level
+                        ),
                         "name": "provider credential",
                         "message": (
                             "environment/config key found"
-                            if credential_present
+                            if capability["credential_configured"]
                             else "review-only rules fallback"
                         ),
                     }
@@ -364,7 +438,7 @@ class AgentService:
                 checks.append(
                     {
                         "level": "OK",
-                        "name": "provider endpoint",
+                        "name": "provider endpoint configuration",
                         "message": self.config.ai_config.base_url
                         or "http://localhost:11434/v1",
                     }
@@ -390,6 +464,7 @@ class AgentService:
                 operation,
                 {
                     "ready": errors == 0,
+                    "provider_ready": capability["ready"],
                     "errors": errors,
                     "warnings": warnings,
                     "checks": checks,
@@ -410,7 +485,14 @@ class AgentService:
                 {
                     "dry_run": True,
                     "queued": False,
-                    "side_effects": ["provider_analysis"],
+                    "side_effects": (
+                        ["provider_analysis"]
+                        if prepared["analysis_execution"][
+                            "provider_request_attempted"
+                        ]
+                        else []
+                    ),
+                    "analysis_execution": prepared["analysis_execution"],
                     "file_path": prepared["file_path"],
                     "analysis": prepared["analysis"],
                     "proposed_action": prepared["proposed_action"],
@@ -439,10 +521,15 @@ class AgentService:
                     "deduplicated": not created,
                     "already_queued": not created,
                     "source_file_mutated": False,
-                    "side_effects": [
-                        "provider_analysis",
-                        "queue_database_write" if created else "queue_database_read",
-                    ],
+                    "side_effects": (
+                        ["provider_analysis"]
+                        if prepared["analysis_execution"][
+                            "provider_request_attempted"
+                        ]
+                        else []
+                    )
+                    + ["queue_database_write" if created else "queue_database_read"],
+                    "analysis_execution": prepared["analysis_execution"],
                     "human_approval_required": True,
                     "action": self._action_payload(action),
                 },

@@ -44,7 +44,6 @@ class FileOrganizer:
 
         self.config = config
         self.archive_base = Path(config.base_path).expanduser()
-        self.archive_base.mkdir(parents=True, exist_ok=True)
         self._now = now
 
     def get_proposed_action(

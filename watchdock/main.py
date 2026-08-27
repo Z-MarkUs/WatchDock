@@ -513,6 +513,16 @@ def _execute_claimed_action(
     queue: PendingActionsQueue,
     action: PendingAction,
 ) -> Tuple[bool, Dict[str, Any]]:
+    try:
+        _validated_watched_source(config, action.file_path)
+    except (OSError, ValueError):
+        error = (
+            "source is no longer inside a currently enabled watched folder; "
+            "re-analysis is required"
+        )
+        queue.fail(action.action_id, error)
+        return False, {"error": error}
+
     if not queue.source_matches(action):
         error = "source changed after review; re-analysis is required"
         queue.fail(action.action_id, error)

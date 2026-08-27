@@ -23,6 +23,7 @@ from watchdock import __version__
 from watchdock.config import WatchDockConfig, WatchedFolder, AIConfig, ArchiveConfig
 from watchdock.file_organizer import FileOrganizer
 from watchdock.logging_utils import configure_logging
+from watchdock.main import _validated_watched_source
 from watchdock.paths import default_config_path
 from watchdock.pending_actions import PendingActionsQueue
 
@@ -141,6 +142,7 @@ def execute_review_action(
     organizer: FileOrganizer,
     action_id: str,
     *,
+    config: WatchDockConfig,
     worker_id: str = "gui",
     retry_failed: bool = True,
 ) -> ReviewExecutionResult:
@@ -172,6 +174,13 @@ def execute_review_action(
         )
 
     try:
+        try:
+            _validated_watched_source(config, action.file_path)
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(
+                "Source is no longer inside a currently enabled watched folder; "
+                "action was not executed"
+            ) from exc
         if not queue_repository.source_matches(action):
             raise RuntimeError(
                 "Source changed or disappeared after review; action was not executed"
@@ -1936,6 +1945,7 @@ class WatchDockGUI:
                 self.pending_queue,
                 organizer,
                 action_id,
+                config=self.config,
                 worker_id=f"gui-{os.getpid()}",
             )
             for action_id in action_ids

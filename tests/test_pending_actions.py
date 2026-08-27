@@ -109,6 +109,35 @@ def test_add_or_get_active_deduplicates_without_changing_add_semantics(tmp_path)
     assert len(queue.list_actions()) == 3
 
 
+def test_add_or_get_active_does_not_match_legacy_null_hash_to_hashed_source(
+    tmp_path,
+):
+    source = _source(tmp_path)
+    queue = _queue(tmp_path)
+    analysis = {"category": "Documents"}
+    proposal = {
+        "action_type": "move",
+        "from": str(source),
+        "to": str(tmp_path / "Archive" / "source.txt"),
+    }
+
+    legacy = queue.add(str(source), analysis, proposal, include_source_hash=False)
+    hashed, hashed_created = queue.add_or_get_active(
+        str(source), analysis, proposal, include_source_hash=True
+    )
+    duplicate, duplicate_created = queue.add_or_get_active(
+        str(source), analysis, proposal, include_source_hash=True
+    )
+
+    assert legacy.source_sha256 is None
+    assert hashed_created is True
+    assert hashed.action_id != legacy.action_id
+    assert hashed.source_sha256 is not None
+    assert duplicate_created is False
+    assert duplicate.action_id == hashed.action_id
+    assert len(queue.list_actions()) == 2
+
+
 def test_add_or_get_active_is_atomic_across_competing_connections(tmp_path):
     source = _source(tmp_path)
     db_path = tmp_path / "dedupe.sqlite3"

@@ -25,6 +25,14 @@ class MutatingProcessor:
         return dict(ANALYSIS)
 
 
+class RulesProcessor:
+    available = False
+    unavailable_reason = "provider client is unavailable"
+
+    def analyze_file(self, _file_path):
+        return dict(ANALYSIS) | {"analysis_source": "rules"}
+
+
 def make_service(tmp_path, *, processor=None):
     inbox = tmp_path / "inbox"
     inbox.mkdir(exist_ok=True)
@@ -54,6 +62,9 @@ def assert_envelope(response, operation, *, ok=True):
 
 def test_status_and_doctor_are_structured_and_report_no_execution_capability(tmp_path):
     service = make_service(tmp_path)
+    archive = tmp_path / "archive"
+
+    assert not archive.exists()
 
     status = service.status()
     assert_envelope(status, "status")
@@ -64,13 +75,50 @@ def test_status_and_doctor_are_structured_and_report_no_execution_capability(tmp
         "human_approval_required": True,
         "filesystem_execution_available": False,
     }
+    assert status["data"]["ai"]["client_package"] == "openai"
+    assert not archive.exists()
 
     doctor = service.doctor()
     assert_envelope(doctor, "doctor")
     assert doctor["data"]["ready"] is True
     assert doctor["data"]["errors"] == 0
     assert doctor["data"]["side_effects"] == ["archive_write_probe"]
-    assert not list((tmp_path / "archive").glob(".watchdock-agent-doctor-*"))
+    assert archive.is_dir()
+    assert not list(archive.glob(".watchdock-agent-doctor-*"))
+
+
+def test_ollama_readiness_uses_openai_compatible_client_capability(
+    tmp_path, monkeypatch
+):
+    service = make_service(tmp_path, processor=RulesProcessor())
+    looked_up = []
+
+    def missing_package(name):
+        looked_up.append(name)
+        return None
+
+    monkeypatch.setattr(
+        "watchdock.agent_service.importlib.util.find_spec", missing_package
+    )
+
+    status = service.status()
+    ai = status["data"]["ai"]
+    assert looked_up == ["openai"]
+    assert ai["client_package"] == "openai"
+    assert ai["package_installed"] is False
+    assert ai["client_available"] is False
+    assert ai["credential_configured"] is True
+    assert ai["ready"] is False
+    assert ai["unavailable_reason"] == "provider client is unavailable"
+
+    doctor = service.doctor()
+    checks = {check["name"]: check for check in doctor["data"]["checks"]}
+    assert looked_up == ["openai", "openai"]
+    assert doctor["data"]["provider_ready"] is False
+    assert checks["provider package"]["level"] == "WARN"
+    assert checks["provider package"]["message"] == "install WatchDock[openai]"
+    assert checks["provider client"]["level"] == "WARN"
+    assert checks["provider endpoint configuration"]["level"] == "OK"
 
 
 def test_analyze_is_a_dry_run_and_queue_persists_without_moving(tmp_path):
@@ -87,6 +135,7 @@ def test_analyze_is_a_dry_run_and_queue_persists_without_moving(tmp_path):
     proposed_destination = Path(analyzed["data"]["proposed_action"]["to"])
     assert source.read_bytes() == original
     assert not proposed_destination.exists()
+    assert not (tmp_path / "archive").exists()
     assert service.pending_queue.list_actions() == []
 
     queued = service.queue_file(str(source))
@@ -106,6 +155,7 @@ def test_analyze_is_a_dry_run_and_queue_persists_without_moving(tmp_path):
     assert queued["data"]["action"]["safety"]["source_current"] is True
     assert source.read_bytes() == original
     assert not Path(queued["data"]["action"]["proposed_action"]["to"]).exists()
+    assert not (tmp_path / "archive").exists()
     assert len(service.pending_queue.get_pending()) == 1
 
     duplicate = service.queue_file(str(source))
@@ -117,6 +167,37 @@ def test_analyze_is_a_dry_run_and_queue_persists_without_moving(tmp_path):
         "provider_analysis",
         "queue_database_read",
     ]
+    assert duplicate["data"]["action"]["action_id"] == queued["data"]["action"][
+        "action_id"
+    ]
+    assert len(service.pending_queue.get_pending()) == 1
+
+
+def test_rules_fallback_does_not_claim_provider_network_activity(tmp_path):
+    service = make_service(tmp_path, processor=RulesProcessor())
+    source = tmp_path / "inbox" / "offline.txt"
+    source.write_text("local rules only", encoding="utf-8")
+
+    analyzed = service.analyze_file(str(source))
+    assert analyzed["data"]["analysis_execution"] == {
+        "source": "rules",
+        "provider_request_attempted": False,
+    }
+    assert analyzed["data"]["side_effects"] == []
+
+    queued = service.queue_file(str(source))
+    assert queued["data"]["analysis_execution"] == {
+        "source": "rules",
+        "provider_request_attempted": False,
+    }
+    assert queued["data"]["side_effects"] == ["queue_database_write"]
+
+    duplicate = service.queue_file(str(source))
+    assert duplicate["ok"] is True
+    assert duplicate["data"]["created"] is False
+    assert duplicate["data"]["deduplicated"] is True
+    assert duplicate["data"]["already_queued"] is True
+    assert duplicate["data"]["side_effects"] == ["queue_database_read"]
     assert duplicate["data"]["action"]["action_id"] == queued["data"]["action"][
         "action_id"
     ]
