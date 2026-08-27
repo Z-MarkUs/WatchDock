@@ -64,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI covers Python 3.10 through 3.14, optional providers, deterministic agent
   packaging, clean-wheel installation, and real MCP stdio calls. Tagged builds
   exercise frozen MCP executables on Windows, macOS, and Linux.
+- Intel macOS frozen builds require the final cryptography universal2 wheel
+  line and prohibit source fallback; MCP startup errors retain the underlying
+  import failure for actionable release diagnostics.
 - Windows acceptance covered a real Codex skill-to-MCP queue and separate CLI
   approval. Claude Code validated and installed the marketplace/plugin, resolved
   all three skills, and connected to the MCP server; model-driven Claude

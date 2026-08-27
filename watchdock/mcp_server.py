@@ -32,7 +32,8 @@ def _load_mcp_api() -> tuple[Any, Any]:
     except (ImportError, ModuleNotFoundError) as exc:
         raise RuntimeError(
             "WatchDock's MCP server requires the optional MCP dependency; "
-            "install WatchDock with its 'mcp' extra"
+            "install WatchDock with its 'mcp' extra. "
+            f"Import failed with {type(exc).__name__}: {exc}"
         ) from exc
     return MCPServer, ToolAnnotations
 

@@ -56,7 +56,7 @@ def test_module_import_is_mcp_optional_and_dependency_error_is_actionable(monkey
     # Base WatchDock imports succeed; MCP is requested only when a server is built.
     assert "MCPServer" not in vars(module)
     assert "ToolAnnotations" not in vars(module)
-    with pytest.raises(RuntimeError, match="optional MCP dependency"):
+    with pytest.raises(RuntimeError, match="ImportError: mcp intentionally unavailable"):
         module._load_mcp_api()
 
 
