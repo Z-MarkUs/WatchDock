@@ -64,8 +64,7 @@ python -m pip install "watchdock[mcp,anthropic]"
 python -m pip install "watchdock[mcp,ai]"
 ```
 
-If PyPI still serves WatchDock 0.2.x, install the 0.3.0 source checkout while
-the release candidate is being validated:
+For development against the current source checkout:
 
 ```console
 git clone https://github.com/Z-MarkUs/WatchDock.git
@@ -73,13 +72,12 @@ cd WatchDock
 python -m pip install -e ".[mcp]"
 ```
 
-The 0.3.0 release pipeline also builds a versioned, self-contained agent-plugin
+The 0.3.0 release includes a versioned, self-contained agent-plugin
 ZIP. That archive contains the Claude marketplace, Codex/Claude manifests,
 skills, references, and MCP launch configuration, but no executable. Install the
 matching `watchdock[mcp]` package first, extract the ZIP, and use its top-level
 directory as a local Claude marketplace. The platform application archives are
-separate; the 0.3.0 candidate adds a frozen MCP executable to those archives,
-subject to the final release build and smoke tests.
+separate and contain CLI, GUI, and frozen MCP applications for their target OS.
 
 ## Run the server directly
 
@@ -116,10 +114,9 @@ codex plugin add watchdock-agent@watchdock
 ```
 
 The `--ref` pin keeps the marketplace catalog, skills, and MCP launch
-configuration on the same reviewed release. The command becomes the public
-install path when the `v0.3.0` tag is published. For release-candidate testing
-before that tag exists, use `--ref main` and record the exact commit; do not
-describe that development install as a tagged release.
+configuration on the same reviewed release. For development testing, use
+`--ref main` and record the exact commit rather than describing it as a tagged
+installation.
 
 Start a new Codex task after installation so it discovers the plugin's skills
 and MCP server. Example requests include:
@@ -130,10 +127,9 @@ Use $watchdock-review to explain my pending WatchDock actions.
 Use $watchdock-doctor to diagnose my WatchDock setup.
 ```
 
-The catalog and plugin manifests are present, but a clean marketplace install
-and real queue/review flow remain explicit final release gates. They are tracked
-in [Agent evaluations](AGENT_EVALS.md); manifest discovery alone is not treated
-as live end-to-end acceptance.
+The release evidence includes marketplace installation, skill discovery, a real
+MCP queue call, and separate CLI approval on Windows. Exact versions and the
+remaining cross-client scope are tracked in [Agent evaluations](AGENT_EVALS.md).
 
 ### Direct MCP and individual skills
 
@@ -213,10 +209,10 @@ Plugin skills are namespaced in Claude Code:
 /watchdock-agent:watchdock-doctor
 ```
 
-The marketplace and plugin manifests are present, but a clean Claude Code
-install and real queue/review flow remain explicit final release gates. They are
-tracked in [Agent evaluations](AGENT_EVALS.md); this documentation does not claim
-that live acceptance from manifest structure alone.
+The release evidence includes native marketplace/plugin validation, isolated
+installation, three-skill discovery, and a connected MCP health check on
+Windows. Model-driven Claude Code queueing still requires an authenticated
+Claude session and is reported separately in [Agent evaluations](AGENT_EVALS.md).
 
 ## Exact tool effects
 

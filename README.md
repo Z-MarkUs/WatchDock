@@ -131,8 +131,8 @@ python -m pip install "watchdock[mcp,ai]"
 PowerShell and Command Prompt need the quotes around requirements containing
 brackets. Tkinter is included by most standard Python installers.
 
-Agent/MCP support belongs to the 0.3.0 release line. If the PyPI badge above
-still shows 0.2.x, install the current source checkout for agent testing:
+Agent/MCP support requires WatchDock 0.3.0 or newer. For development against the
+current source checkout:
 
 ```console
 git clone https://github.com/Z-MarkUs/WatchDock.git
@@ -142,10 +142,8 @@ python -m pip install -e ".[mcp]"
 
 Standalone CLI and GUI archives are available from
 [GitHub Releases](https://github.com/Z-MarkUs/WatchDock/releases/latest). They
-are currently unsigned. Published 0.2.x archives contain CLI and GUI only; the
-0.3.0 release candidate adds a third, separately smoke-tested MCP executable.
-Until that release is public and its assets are verified, install
-`watchdock[mcp]` for `watchdock-mcp`.
+are currently unsigned. WatchDock 0.3.0 and newer platform archives contain
+distinct CLI, GUI, and MCP applications plus published SHA-256 checksums.
 
 ## Quick start
 
@@ -192,10 +190,8 @@ codex plugin marketplace add Z-MarkUs/WatchDock --ref v0.3.0
 codex plugin add watchdock-agent@watchdock
 ```
 
-The tagged commands are the preferred public install path once `v0.3.0` is
-published. For release-candidate testing, substitute `--ref main`; the live
-Codex flow remains a release gate. A direct `codex mcp add` setup is documented
-as a development fallback.
+The tag pins the catalog, skills, and MCP configuration to the reviewed 0.3.0
+release. A direct `codex mcp add` setup is documented as a development fallback.
 
 The repository includes three portable workflows:
 `watchdock-organize`, `watchdock-review`, and `watchdock-doctor`. The complete
@@ -205,8 +201,8 @@ exact side effects:
 
 **[Set up WatchDock for coding agents &rarr;](https://github.com/Z-MarkUs/WatchDock/blob/main/docs/AGENT_INTEGRATION.md)**
 
-Codex and Claude Code live end-to-end acceptance is intentionally tracked as a
-release gate rather than claimed from manifest presence alone. See
+Codex, Claude Code, clean-package, and protocol evidence is tracked separately
+from manifest presence. See
 [Agent evaluations](https://github.com/Z-MarkUs/WatchDock/blob/main/docs/AGENT_EVALS.md)
 for the current evidence and remaining checks.
 

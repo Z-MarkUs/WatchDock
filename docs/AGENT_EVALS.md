@@ -7,20 +7,19 @@ mistaken for an end-to-end result.
 
 ## Current evidence status
 
-The 0.3.0 release candidate includes the agent service, eight-tool MCP server,
-three portable skills, a Codex Git marketplace and plugin manifest, and a Claude
-Code marketplace. Repository tests cover the service and protocol invariants
-below. Final clean package installation and live Codex and Claude Code acceptance
-are still release gates and must be recorded before this document or the README
-claims those flows passed.
+WatchDock 0.3.0 includes the agent service, eight-tool MCP server, three portable
+skills, a Codex Git marketplace/plugin, and a Claude Code marketplace/plugin.
+The release audit combines repository tests, public CI, clean package/protocol
+smokes, and the client-specific evidence below. Client results are intentionally
+reported at their actual depth rather than inferred from valid manifests.
 
 | Evidence layer | Current status | Required release evidence |
 | --- | --- | --- |
-| Agent service behavior | Automated coverage present | Green public CI for the release commit |
-| MCP tool inventory and structured results | Automated coverage present | Green public CI plus clean installed-wheel stdio session |
-| Codex marketplace and plugin | Manifests present | Add the tagged Git marketplace in a clean profile; install the plugin; run a real queue flow |
-| Claude marketplace and plugin | Manifests present | `claude plugin validate .`; clean marketplace install; run a real queue flow |
-| Human handoff | Core GUI/CLI behavior covered separately | Queue from each live client, approve outside the agent, verify exact destination and sidecar |
+| Agent service behavior | Green locally and in public CI | Keep the release-commit workflow green |
+| MCP tool inventory and structured results | Green source, clean-wheel, and real stdio smokes | Repeat in tagged platform builds |
+| Codex marketplace and plugin | Windows live queue flow passed from installed skill through MCP | Repeat the marketplace install from the public tag |
+| Claude marketplace and plugin | Native validation, isolated install, three-skill discovery, and MCP health passed | Model-driven queue requires an authenticated Claude session |
+| Human handoff | Codex-queued source was approved separately; exact bytes, destination, sidecar, and completed state verified | Claude model-driven handoff not claimed |
 
 ## Invariants
 
@@ -48,6 +47,10 @@ Every release audit should prove all of these statements:
     side-effect-free read.
 14. Standard output from `watchdock-mcp` remains reserved for the stdio
     protocol.
+15. Approval rechecks that the source remains inside a currently enabled watched
+    root before executing the reviewed proposal.
+16. A hashed agent request never reuses a legacy active action whose digest is
+    absent.
 
 These are integration invariants, not proof that an agent with independent
 shell or filesystem tools is sandboxed.
@@ -127,11 +130,15 @@ affect discovery.
 11. Repeat with an outside-root file, changed queued source, occupied
     destination, and repeated queue request.
 
-Record the Codex version, operating system, model/client mode, installation
-commands, sanitized transcript, and artifact hashes. Until this checklist is
-complete, use “Codex marketplace and plugin candidate” or “Codex setup
-available,” not
-“end-to-end tested with Codex.”
+The 2026-08-28 Windows acceptance used Codex CLI `0.150.0-alpha.8` in an
+ephemeral task. It loaded `watchdock-organize`, called `status`, queued one exact
+test file through MCP, returned a pending SHA-256-backed action, and reported
+`source_file_mutated=false`. Before approval the source digest was unchanged and
+the destination was absent. A separate CLI approval then produced the exact
+destination, byte-identical digest, `.watchdock.json` sidecar, and completed
+state. The no-approval policy path was also exercised and correctly created no
+action. The broader negative matrix remains covered by automated regressions,
+not claimed as repeated model-driven calls.
 
 ## Claude Code live acceptance
 
@@ -149,8 +156,13 @@ outside-root, destination-collision, and deduplication cases used for Codex.
 Record the Claude Code version, plugin scope, marketplace revision, operating
 system, sanitized transcript, and final artifact hashes.
 
-Until this checklist is complete, describe the repository as containing a
-Claude Code marketplace and plugin candidate, not as live Claude-validated.
+The 2026-08-28 Windows acceptance used Claude Code `2.1.240` with an isolated
+configuration. Native validation passed for the marketplace and plugin; local
+marketplace installation reported version `0.3.0`; component discovery found
+all three skills and one MCP server; and `claude mcp list` connected successfully.
+A model-driven queue was not run because the isolated client was not logged in.
+The project therefore claims Claude-native packaging and MCP connectivity, not
+a Claude model-driven queue/handoff.
 
 ## Results template
 
@@ -158,8 +170,8 @@ Add one row only after retaining the corresponding evidence:
 
 | Client | Version | OS | Package source | Manifest/skill validation | Queue flow | External approval | Negative cases | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Codex | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
-| Claude Code | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
+| Codex | 0.150.0-alpha.8 | Windows | 0.3.0 source candidate + installed local catalog | Passed: skill loaded and MCP tools called | Passed | Passed: exact bytes, destination, sidecar, completed state | Automated suite; live no-approval path | 2026-08-28 acceptance + public CI |
+| Claude Code | 2.1.240 | Windows | 0.3.0 source candidate + isolated local marketplace | Passed: native validation, 3 skills, connected MCP | Not run: login required | Not claimed | Automated protocol suite | 2026-08-28 structural/connectivity acceptance |
 
 Evidence may be a public CI run, a committed sanitized transcript, screenshots,
 and checksums. Do not link private filenames, credentials, prompts, or home

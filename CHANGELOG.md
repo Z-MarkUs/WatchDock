@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - Unreleased
+## [0.3.0] - 2026-08-28
 
 ### Added
 
@@ -59,12 +59,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discloses provider/network effects and the doctor write probe, and describes
   absolute path and lifecycle-history visibility to connected clients.
 
-### Validation status
+### Validation
 
-- Service and MCP regression coverage is included in the repository. Clean
-  installed-wheel protocol checks and live Codex and Claude Code flows remain
-  explicit final release gates and are not claimed complete by manifest
-  presence alone.
+- CI covers Python 3.10 through 3.14, optional providers, deterministic agent
+  packaging, clean-wheel installation, and real MCP stdio calls. Tagged builds
+  exercise frozen MCP executables on Windows, macOS, and Linux.
+- Windows acceptance covered a real Codex skill-to-MCP queue and separate CLI
+  approval. Claude Code validated and installed the marketplace/plugin, resolved
+  all three skills, and connected to the MCP server; model-driven Claude
+  queueing remains dependent on an authenticated Claude session.
 
 ## [0.2.0] - 2026-08-24
 
